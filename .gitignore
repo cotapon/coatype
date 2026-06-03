@@ -26,3 +26,10 @@ dist-ssr
 # CoAType specific
 .env
 *.db
+
+# Rust/Cargo
+target/
+.cargo-home/
+
+# Tauri
+src-tauri/gen/
