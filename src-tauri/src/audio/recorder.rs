@@ -9,6 +9,11 @@ pub struct Recorder {
     stream: Option<cpal::Stream>,
 }
 
+// cpal::Stream is !Send, but Recorder is always accessed through a Mutex<Recorder>
+// and the stream is never sent across threads — only created/dropped on the same thread
+// or while holding the lock. This is safe in practice.
+unsafe impl Send for Recorder {}
+
 impl Recorder {
     pub fn new() -> Self {
         Self {

@@ -46,3 +46,6 @@ mockito = "1"
 [features]
 default = []
 
+[patch.crates-io]
+rdev = { path = "vendor/rdev" }
+

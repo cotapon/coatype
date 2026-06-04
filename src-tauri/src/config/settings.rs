@@ -23,7 +23,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             language: "ja".into(),
-            shortcut: "RightOption".into(),
+            shortcut: "rightoption".into(),
             trigger_mode: TriggerMode::PushToTalk,
             translate_mode: false,
             translate_model: None,

@@ -1,5 +1,6 @@
 pub mod api;
 pub mod audio;
+pub mod commands;
 pub mod config;
 pub mod dictionary;
 pub mod history;
