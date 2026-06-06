@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
-import type { Settings, Dictionary, HistoryItem } from "./types";
+import { listen } from "@tauri-apps/api/event";
+import type { Settings, Dictionary, HistoryItem, ActiveShortcut } from "./types";
 import {
   getSettings, saveSettings,
   getDictionary, saveDictionary,
   listHistory, clearHistory,
   saveApiKey, hasApiKey,
+  checkAccessibility, openAccessibilitySettings,
+  activeShortcut,
 } from "./invoke";
 import "./settings.css";
 
@@ -24,7 +27,12 @@ export function SettingsPage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [apiKey, setApiKey] = useState("");
   const [keyExists, setKeyExists] = useState(false);
+  const [accessibilityOk, setAccessibilityOk] = useState(true);
+  const [listenerState, setListenerState] = useState<ActiveShortcut | null>(null);
   const [banner, setBanner] = useState<{ type: "saved" | "error"; text: string } | null>(null);
+
+  const refreshListenerState = () =>
+    activeShortcut().then(setListenerState).catch(console.error);
 
   useEffect(() => {
     getSettings()
@@ -32,6 +40,23 @@ export function SettingsPage() {
       .catch(console.error);
     getDictionary().then(setDict).catch(console.error);
     hasApiKey().then(setKeyExists).catch(console.error);
+    checkAccessibility().then(setAccessibilityOk).catch(console.error);
+    refreshListenerState();
+
+    // shortcut-error: リスナー初期化失敗 (parse エラー or CGEventTap 失敗)
+    const ul1 = listen<string>("shortcut-error", (e) => {
+      flash("error", `ショートカット初期化失敗: ${e.payload}`);
+      refreshListenerState();
+    });
+    // error: pipeline 側のエラー (マイク権限失敗など)
+    const ul2 = listen<string>("error", (e) => {
+      flash("error", e.payload);
+    });
+
+    return () => {
+      ul1.then((fn) => fn());
+      ul2.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {
@@ -45,7 +70,11 @@ export function SettingsPage() {
 
   const handleSaveSettings = async () => {
     if (!settings) return;
-    try { await saveSettings(settings); flash("saved", "保存しました ✓"); }
+    try {
+      await saveSettings(settings);
+      flash("saved", "保存しました ✓");
+      refreshListenerState();
+    }
     catch (e) { flash("error", String(e)); }
   };
 
@@ -94,7 +123,16 @@ export function SettingsPage() {
 
         <div className="content">
           {pane === "general" && (
-            <GeneralPane settings={settings} onChange={setSettings} onSave={handleSaveSettings} />
+            <GeneralPane
+              settings={settings}
+              onChange={setSettings}
+              onSave={handleSaveSettings}
+              accessibilityOk={accessibilityOk}
+              onRefreshAccessibility={() =>
+                checkAccessibility().then(setAccessibilityOk).catch(console.error)
+              }
+              listenerState={listenerState}
+            />
           )}
           {pane === "dictionary" && (
             <DictionaryPane dict={dict} onChange={setDict} onSave={handleSaveDict} />
@@ -119,22 +157,52 @@ export function SettingsPage() {
 // --------------- General ---------------
 
 const SHORTCUT_OPTIONS = [
-  { value: "rightoption", label: "Right Option ⌥" },
-  { value: "leftoption",  label: "Left Option ⌥L" },
-  { value: "rightcontrol", label: "Right Control ⌃" },
+  { value: "rightoption",  label: "Right Option ⌥" },
+  { value: "leftoption",   label: "Left Option ⌥L" },
+  { value: "rightcontrol", label: "Right Control ⌃R" },
   { value: "leftcontrol",  label: "Left Control ⌃L" },
   { value: "f5", label: "F5" },
   { value: "f6", label: "F6" },
+  { value: "f7", label: "F7" },
+  { value: "f8", label: "F8" },
 ];
 
 function GeneralPane({
-  settings, onChange, onSave,
-}: { settings: Settings; onChange: (s: Settings) => void; onSave: () => void }) {
+  settings, onChange, onSave, accessibilityOk, onRefreshAccessibility, listenerState,
+}: {
+  settings: Settings;
+  onChange: (s: Settings) => void;
+  onSave: () => void;
+  accessibilityOk: boolean;
+  onRefreshAccessibility: () => void;
+  listenerState: ActiveShortcut | null;
+}) {
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
 
   return (
     <div className="form-section">
       <div className="pane-title">一般設定</div>
+
+      {!accessibilityOk && (
+        <div className="accessibility-warning">
+          <div className="accessibility-warning-title">⚠️ アクセシビリティ権限が必要です</div>
+          <div className="accessibility-warning-body">
+            グローバルショートカットを使うには「システム設定 → プライバシーとセキュリティ → アクセシビリティ」で
+            CoAType を許可してください。
+          </div>
+          <div className="accessibility-warning-actions">
+            <button
+              className="btn-secondary"
+              onClick={() => openAccessibilitySettings()}
+            >
+              システム設定を開く
+            </button>
+            <button className="btn-secondary" onClick={onRefreshAccessibility}>
+              再確認
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="section-header">文字起こし</div>
 
@@ -164,6 +232,17 @@ function GeneralPane({
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
+          {listenerState && (
+            <div className={`listener-badge listener-badge-${listenerState.status}`}>
+              {listenerState.status === "starting" && "⏳ 起動中..."}
+              {listenerState.status === "ok" &&
+                `✓ 有効: ${listenerState.shortcut}`}
+              {listenerState.status === "parse_error" &&
+                `❌ ${listenerState.error}`}
+              {listenerState.status === "tap_failed" &&
+                `❌ ${listenerState.error}`}
+            </div>
+          )}
         </div>
       </div>
 

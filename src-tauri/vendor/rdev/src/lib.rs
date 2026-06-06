@@ -324,42 +324,21 @@ pub fn display_size() -> Result<(u64, u64), DisplayError> {
 #[cfg(feature = "unstable_grab")]
 #[cfg(target_os = "linux")]
 pub use crate::linux::grab as _grab;
-#[cfg(feature = "unstable_grab")]
 #[cfg(target_os = "macos")]
 pub use crate::macos::grab as _grab;
 #[cfg(feature = "unstable_grab")]
 #[cfg(target_os = "windows")]
 pub use crate::windows::grab as _grab;
-#[cfg(any(feature = "unstable_grab"))]
-/// Grabbing global events. In the callback, returning None ignores the event
-/// and returning the event let's it pass. There is no modification of the event
-/// possible here.
-/// Caveat: On MacOS, you require the grab
-/// loop needs to be the primary app (no fork before) and need to have accessibility
-/// settings enabled.
-/// On Linux, you need rw access to evdev devices in /etc/input/ (usually group membership in `input` group is enough)
+
+/// Grabbing global events. In the callback, returning None consumes the event
+/// (it will not be delivered to other applications), and returning Some(event)
+/// lets it pass through. Available on macOS without any feature flag.
 ///
-/// ```no_run
-/// use rdev::{grab, Event, EventType, Key};
-///
-/// fn callback(event: Event) -> Option<Event> {
-///     println!("My callback {:?}", event);
-///     match event.event_type{
-///         EventType::KeyPress(Key::Tab) => None,
-///         _ => Some(event),
-///     }
-/// }
-/// fn main(){
-///     // This will block.
-///     if let Err(error) = grab(callback) {
-///         println!("Error: {:?}", error)
-///     }
-/// }
-/// ```
-#[cfg(any(feature = "unstable_grab"))]
+/// Requires Accessibility permission on macOS.
+#[cfg(target_os = "macos")]
 pub fn grab<T>(callback: T) -> Result<(), GrabError>
 where
-    T: Fn(Event) -> Option<Event> + 'static,
+    T: FnMut(Event) -> Option<Event> + 'static,
 {
     _grab(callback)
 }

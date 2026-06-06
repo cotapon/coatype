@@ -3,7 +3,7 @@ use reqwest::multipart::{Form, Part};
 
 pub struct WhisperClient {
     base: String,
-    api_key: String,
+    api_key: std::sync::Arc<std::sync::Mutex<String>>,
     http: reqwest::Client,
 }
 
@@ -18,7 +18,15 @@ impl WhisperClient {
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .expect("reqwest client");
-        Self { base, api_key, http }
+        Self {
+            base,
+            api_key: std::sync::Arc::new(std::sync::Mutex::new(api_key)),
+            http,
+        }
+    }
+
+    pub fn set_api_key(&self, key: String) {
+        *self.api_key.lock().unwrap() = key;
     }
 
     pub async fn transcribe(
@@ -58,10 +66,11 @@ impl WhisperClient {
 
     async fn post(&self, path: &str, form: Form) -> Result<String, ApiError> {
         let url = format!("{}{}", self.base, path);
+        let key = self.api_key.lock().unwrap().clone();
         let resp = self
             .http
             .post(&url)
-            .bearer_auth(&self.api_key)
+            .bearer_auth(&key)
             .multipart(form)
             .send()
             .await?;

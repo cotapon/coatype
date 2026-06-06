@@ -3,8 +3,11 @@ pub mod audio;
 pub mod commands;
 pub mod config;
 pub mod dictionary;
+#[cfg(target_os = "macos")]
+pub mod focus;
 pub mod history;
 pub mod injector;
+pub mod permissions;
 pub mod pipeline;
 pub mod secrets;
 pub mod shortcut;

@@ -29,7 +29,6 @@ pub const kCGHeadInsertEventTap: u32 = 0;
 #[allow(non_upper_case_globals)]
 #[repr(u32)]
 pub enum CGEventTapOption {
-    #[cfg(feature = "unstable_grab")]
     Default = 0,
     ListenOnly = 1,
 }
@@ -115,11 +114,21 @@ pub unsafe fn convert(
             let code = cg_event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
             let code = code.try_into().ok()?;
             let flags = cg_event.get_flags();
-            if flags < LAST_FLAGS {
-                LAST_FLAGS = flags;
+            // キーごとのフラグビットが落ちたかどうかで KeyRelease を判定する。
+            // flags < LAST_FLAGS という数値比較だと、別の修飾キーが変化した際に
+            // 保持中のキーの疑似 KeyRelease が誤発火するため使用しない。
+            let is_release = {
+                let bit = flag_bit_for_keycode(code);
+                if bit != 0 {
+                    (LAST_FLAGS.bits() & bit) != 0 && (flags.bits() & bit) == 0
+                } else {
+                    flags < LAST_FLAGS
+                }
+            };
+            LAST_FLAGS = flags;
+            if is_release {
                 Some(EventType::KeyRelease(key_from_code(code)))
             } else {
-                LAST_FLAGS = flags;
                 Some(EventType::KeyPress(key_from_code(code)))
             }
         }
@@ -149,4 +158,18 @@ pub unsafe fn convert(
         });
     }
     None
+}
+
+/// macOS キーコード → 対応する CGEventFlags ビット。
+/// FlagsChanged イベントで KeyRelease を正確に判定するために使用する。
+fn flag_bit_for_keycode(code: u16) -> u64 {
+    match code {
+        56 | 60 => CGEventFlags::CGEventFlagShift.bits(),
+        59 | 62 => CGEventFlags::CGEventFlagControl.bits(),
+        58 | 61 => CGEventFlags::CGEventFlagAlternate.bits(),
+        54 | 55 => CGEventFlags::CGEventFlagCommand.bits(),
+        57 => CGEventFlags::CGEventFlagAlphaShift.bits(),
+        63 => CGEventFlags::CGEventFlagSecondaryFn.bits(),
+        _ => 0,
+    }
 }

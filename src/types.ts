@@ -24,3 +24,10 @@ export interface HistoryItem {
   duration_ms: number;
   created_at: string;
 }
+
+export interface ActiveShortcut {
+  shortcut: string;
+  trigger_mode: string;
+  status: "starting" | "ok" | "parse_error" | "tap_failed";
+  error: string | null;
+}

@@ -40,7 +40,7 @@ where
         GLOBAL_CALLBACK = Some(Box::new(callback));
         let _pool = NSAutoreleasePool::new(nil);
         let tap = CGEventTapCreate(
-            CGEventTapLocation::HID, // HID, Session, AnnotatedSession,
+            CGEventTapLocation::Session, // Session で keyboard events を受け取る
             kCGHeadInsertEventTap,
             CGEventTapOption::Default,
             kCGEventMaskForAllEvents,

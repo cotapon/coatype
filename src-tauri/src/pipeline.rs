@@ -3,7 +3,6 @@ use crate::audio::recorder::Recorder;
 use crate::dictionary::llm_correct::LlmCorrectClient;
 use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryStore;
-use crate::injector;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -42,6 +41,10 @@ impl Pipeline {
         }
     }
 
+    pub fn update_api_key(&self, key: String) {
+        self.client.set_api_key(key);
+    }
+
     pub fn start(&self) -> anyhow::Result<()> {
         self.recorder.lock().unwrap().start()?;
         *self.started_at.lock().unwrap() = Some(Instant::now());
@@ -58,6 +61,10 @@ impl Pipeline {
             .map(|s| s.elapsed().as_millis() as i64)
             .unwrap_or(0);
         if wav.len() <= 44 {
+            return Ok(String::new());
+        }
+        if wav_is_silent(&wav) {
+            tracing::debug!("silent audio, skipping transcription");
             return Ok(String::new());
         }
 
@@ -95,7 +102,29 @@ impl Pipeline {
 
         self.history
             .insert(&final_text, &language, translate, elapsed)?;
-        injector::insert(&final_text)?;
         Ok(final_text)
     }
+}
+
+/// WAV の i16 サンプルから RMS を計算し、閾値以下なら true を返す。
+/// Whisper は無音・環境音のみの音声に対して「ありがとうございます」などを幻覚するため、
+/// 送信前にここで弾く。閾値は i16::MAX (32767) の約 1% = 300。
+fn wav_is_silent(wav: &[u8]) -> bool {
+    const WAV_HEADER: usize = 44;
+    const SILENCE_THRESHOLD_RMS: f64 = 300.0;
+
+    let sample_bytes = &wav[WAV_HEADER..];
+    if sample_bytes.len() < 2 {
+        return true;
+    }
+    let sum_sq: f64 = sample_bytes
+        .chunks_exact(2)
+        .map(|c| {
+            let s = i16::from_le_bytes([c[0], c[1]]) as f64;
+            s * s
+        })
+        .sum();
+    let count = (sample_bytes.len() / 2) as f64;
+    let rms = (sum_sq / count).sqrt();
+    rms < SILENCE_THRESHOLD_RMS
 }

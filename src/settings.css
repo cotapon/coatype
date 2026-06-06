@@ -358,6 +358,50 @@ body {
   font-size: 13px;
 }
 
+/* ---- Listener status badge ---- */
+.listener-badge {
+  margin-top: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.listener-badge-starting { background: #f0f0f5; color: #636366; }
+.listener-badge-ok       { background: #d1fae5; color: #065f46; }
+.listener-badge-parse_error,
+.listener-badge-tap_failed { background: #fee2e2; color: #991b1b; }
+
+/* ---- Accessibility warning ---- */
+.accessibility-warning {
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  border-radius: 9px;
+  padding: 12px 14px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.accessibility-warning-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.accessibility-warning-body {
+  font-size: 12px;
+  color: #78350f;
+  line-height: 1.5;
+}
+
+.accessibility-warning-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 /* ---- API Key pane ---- */
 .apikey-status {
   display: flex;

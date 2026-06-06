@@ -3,9 +3,20 @@ use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryItem;
 use crate::pipeline::Pipeline;
 use crate::secrets;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::State;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveShortcut {
+    pub shortcut: String,
+    pub trigger_mode: String,
+    pub status: String, // "starting" | "ok" | "parse_error" | "tap_failed"
+    pub error: Option<String>,
+}
+
+pub struct ListenerState(pub Arc<Mutex<ActiveShortcut>>);
 
 pub struct SettingsPath(pub PathBuf);
 pub struct DictPath(pub PathBuf);
@@ -63,11 +74,33 @@ pub async fn clear_history(pipeline: State<'_, Arc<Pipeline>>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn save_api_key(key: String) -> Result<(), String> {
-    secrets::keychain::save_api_key(&key).map_err(|e| e.to_string())
+pub async fn save_api_key(
+    key: String,
+    pipeline: State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    secrets::keychain::save_api_key(&key).map_err(|e| e.to_string())?;
+    pipeline.update_api_key(key);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn has_api_key() -> bool {
     secrets::keychain::resolve_api_key().is_ok()
+}
+
+#[tauri::command]
+pub async fn check_accessibility() -> bool {
+    crate::permissions::is_accessibility_trusted()
+}
+
+#[tauri::command]
+pub async fn open_accessibility_settings() {
+    crate::permissions::open_accessibility_prefs();
+}
+
+#[tauri::command]
+pub async fn active_shortcut(
+    listener_state: State<'_, ListenerState>,
+) -> Result<ActiveShortcut, String> {
+    Ok(listener_state.0.lock().unwrap().clone())
 }
