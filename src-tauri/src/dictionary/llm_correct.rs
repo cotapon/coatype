@@ -1,9 +1,13 @@
+use crate::api::auth::{apply_auth, AuthKind};
 use crate::api::error::ApiError;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 pub struct LlmCorrectClient {
     base: String,
-    api_key: String,
+    model: String,
+    auth_kind: AuthKind,
+    api_key: Arc<Mutex<String>>,
     http: reqwest::Client,
 }
 
@@ -33,12 +37,22 @@ struct MsgContent {
 }
 
 impl LlmCorrectClient {
-    pub fn new(base: String, api_key: String) -> Self {
+    pub fn new(base: String, model: String, auth_kind: AuthKind, api_key: String) -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap();
-        Self { base, api_key, http }
+        Self {
+            base,
+            model,
+            auth_kind,
+            api_key: Arc::new(Mutex::new(api_key)),
+            http,
+        }
+    }
+
+    pub fn set_api_key(&self, key: String) {
+        *self.api_key.lock().unwrap() = key;
     }
 
     pub async fn correct(
@@ -59,7 +73,7 @@ impl LlmCorrectClient {
             dict_str
         );
         let req = ChatRequest {
-            model: "gpt-4o-mini".into(),
+            model: self.model.clone(),
             messages: vec![
                 ChatMsg { role: "system".into(), content: system },
                 ChatMsg { role: "user".into(), content: text.to_string() },
@@ -67,13 +81,15 @@ impl LlmCorrectClient {
             temperature: 0.0,
             max_tokens: 512,
         };
-        let resp = self
-            .http
-            .post(format!("{}/v1/chat/completions", self.base))
-            .bearer_auth(&self.api_key)
-            .json(&req)
-            .send()
-            .await?;
+        let key = self.api_key.lock().unwrap().clone();
+        let resp = apply_auth(
+            self.http.post(format!("{}/v1/chat/completions", self.base)),
+            &self.auth_kind,
+            &key,
+        )
+        .json(&req)
+        .send()
+        .await?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
@@ -93,6 +109,10 @@ impl LlmCorrectClient {
 mod tests {
     use super::*;
 
+    fn client(url: &str) -> LlmCorrectClient {
+        LlmCorrectClient::new(url.into(), "gpt-4o-mini".into(), AuthKind::Bearer, "test-key".into())
+    }
+
     #[tokio::test]
     async fn correct_fixes_known_term() {
         let mut server = mockito::Server::new_async().await;
@@ -105,17 +125,34 @@ mod tests {
             .create_async()
             .await;
 
-        let client = LlmCorrectClient::new(server.url(), "test-key".into());
         let dict = vec![("さいば".to_string(), "CyberAgent".to_string())];
-        let out = client.correct("さいばの音声入力テスト", &dict).await.unwrap();
+        let out = client(&server.url()).correct("さいばの音声入力テスト", &dict).await.unwrap();
         assert_eq!(out, "CyberAgentの音声入力テスト");
         mock.assert_async().await;
     }
 
     #[tokio::test]
     async fn correct_skips_empty_dict() {
-        let client = LlmCorrectClient::new("http://unused".into(), "key".into());
-        let out = client.correct("そのまま", &[]).await.unwrap();
+        let c = LlmCorrectClient::new("http://unused".into(), "gpt-4o-mini".into(), AuthKind::Bearer, "key".into());
+        let out = c.correct("そのまま", &[]).await.unwrap();
         assert_eq!(out, "そのまま");
+    }
+
+    #[tokio::test]
+    async fn set_api_key_reflected_in_next_request() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", "Bearer new-key")
+            .with_status(200)
+            .with_body(r#"{"choices":[{"message":{"content":"ok"}}]}"#)
+            .create_async()
+            .await;
+
+        let c = client(&server.url());
+        c.set_api_key("new-key".into());
+        let dict = vec![("x".to_string(), "y".to_string())];
+        c.correct("x", &dict).await.unwrap();
+        mock.assert_async().await;
     }
 }
