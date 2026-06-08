@@ -1,9 +1,13 @@
+use crate::api::auth::{apply_auth, AuthKind};
 use crate::api::error::ApiError;
 use reqwest::multipart::{Form, Part};
+use std::sync::{Arc, Mutex};
 
 pub struct WhisperClient {
     base: String,
-    api_key: std::sync::Arc<std::sync::Mutex<String>>,
+    model: String,
+    auth_kind: AuthKind,
+    api_key: Arc<Mutex<String>>,
     http: reqwest::Client,
 }
 
@@ -13,15 +17,17 @@ struct WhisperResponse {
 }
 
 impl WhisperClient {
-    pub fn new(base: String, api_key: String) -> Self {
+    pub fn new(base: String, model: String, auth_kind: AuthKind, api_key: String) -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .expect("reqwest client");
         Self {
             base,
-            api_key: std::sync::Arc::new(std::sync::Mutex::new(api_key)),
-            http,
+            model,
+            auth_kind,
+            api_key: Arc::new(Mutex::new(api_key)),
+        http,
         }
     }
 
@@ -43,7 +49,7 @@ impl WhisperClient {
                     .mime_str("audio/wav")
                     .unwrap(),
             )
-            .text("model", "whisper-large-v3")
+            .text("model", self.model.clone())
             .text("language", language.to_string());
         if let Some(p) = prompt {
             form = form.text("prompt", p.to_string());
@@ -60,17 +66,14 @@ impl WhisperClient {
                     .mime_str("audio/wav")
                     .unwrap(),
             )
-            .text("model", "whisper-large-v3");
+            .text("model", self.model.clone());
         self.post("/v1/audio/translations", form).await
     }
 
     async fn post(&self, path: &str, form: Form) -> Result<String, ApiError> {
         let url = format!("{}{}", self.base, path);
         let key = self.api_key.lock().unwrap().clone();
-        let resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&key)
+        let resp = apply_auth(self.http.post(&url), &self.auth_kind, &key)
             .multipart(form)
             .send()
             .await?;
@@ -88,6 +91,10 @@ impl WhisperClient {
 mod tests {
     use super::*;
 
+    fn client(url: &str) -> WhisperClient {
+        WhisperClient::new(url.into(), "whisper-large-v3".into(), AuthKind::Bearer, "test-key".into())
+    }
+
     #[tokio::test]
     async fn transcribe_returns_text() {
         let mut server = mockito::Server::new_async().await;
@@ -98,9 +105,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = WhisperClient::new(server.url(), "test-key".into());
-        let bytes = b"RIFF....fake".to_vec();
-        let text = client.transcribe(&bytes, "ja", None).await.unwrap();
+        let text = client(&server.url()).transcribe(b"RIFF....fake", "ja", None).await.unwrap();
         assert_eq!(text, "こんにちは");
         mock.assert_async().await;
     }
@@ -115,10 +120,47 @@ mod tests {
             .create_async()
             .await;
 
-        let client = WhisperClient::new(server.url(), "test-key".into());
-        let bytes = b"RIFF....fake".to_vec();
-        let text = client.translate(&bytes).await.unwrap();
+        let text = client(&server.url()).translate(b"RIFF....fake").await.unwrap();
         assert_eq!(text, "Hello");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn custom_model_name_sent_in_request() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/audio/transcriptions")
+            .match_body(mockito::Matcher::Regex("custom-model".to_string()))
+            .with_status(200)
+            .with_body(r#"{"text":"ok"}"#)
+            .create_async()
+            .await;
+
+        let c = WhisperClient::new(
+            server.url(), "custom-model".into(), AuthKind::Bearer, "key".into()
+        );
+        c.transcribe(b"RIFF....fake", "ja", None).await.unwrap();
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn api_key_header_auth_used() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/audio/transcriptions")
+            .match_header("x-api-key", "my-secret")
+            .with_status(200)
+            .with_body(r#"{"text":"ok"}"#)
+            .create_async()
+            .await;
+
+        let c = WhisperClient::new(
+            server.url(),
+            "whisper-1".into(),
+            AuthKind::ApiKeyHeader { header_name: "x-api-key".into() },
+            "my-secret".into(),
+        );
+        c.transcribe(b"RIFF....fake", "ja", None).await.unwrap();
         mock.assert_async().await;
     }
 }
