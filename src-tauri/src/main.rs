@@ -1,12 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use coatype_lib::api::whisper::WhisperClient;
+use coatype_lib::dictionary::llm_correct::LlmCorrectClient;
 use coatype_lib::commands::{ActiveShortcut, DictPath, ListenerState, SettingsPath};
 use coatype_lib::config::settings::{Settings, TriggerMode};
 use coatype_lib::dictionary::replace::Dictionary;
 use coatype_lib::history::store::HistoryStore;
 use coatype_lib::pipeline::Pipeline;
-use coatype_lib::secrets::keychain;
+use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_STT, ACCOUNT_LLM};
 use coatype_lib::shortcut::listener::{self, ShortcutEvent};
 use std::sync::{mpsc, Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
@@ -33,17 +34,29 @@ fn main() {
             let dict = Dictionary::load(&dict_path);
             let history = Arc::new(HistoryStore::open(&db_path)?);
 
-            let api_key = keychain::resolve_api_key().unwrap_or_default();
+            let stt_key = keychain::resolve_api_key_for(
+                if settings.separate_api_keys { ACCOUNT_STT } else { ACCOUNT_COMMON },
+            ).unwrap_or_default();
+            let llm_key = keychain::resolve_api_key_for(
+                if settings.separate_api_keys { ACCOUNT_LLM } else { ACCOUNT_COMMON },
+            ).unwrap_or_default();
+
             let whisper = WhisperClient::new(
                 settings.stt.base_url.clone(),
                 settings.stt.model.clone(),
                 settings.stt.auth_kind.clone(),
-                api_key,
+                stt_key,
+            );
+            let llm = LlmCorrectClient::new(
+                settings.llm.base_url.clone(),
+                settings.llm.model.clone(),
+                settings.llm.auth_kind.clone(),
+                llm_key,
             );
 
             let pipeline = Arc::new(Pipeline::new(
                 whisper,
-                None, // LLM クライアントは設定で ON にしたときに初期化 (Task 11 以降)
+                Some(llm),
                 dict,
                 history,
                 settings.language.clone(),
