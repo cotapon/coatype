@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { Settings, Dictionary, HistoryItem, ActiveShortcut } from "./types";
+import type { Settings, Dictionary, HistoryItem, ActiveShortcut, AuthKind } from "./types";
 import {
   getSettings, saveSettings,
   getDictionary, saveDictionary,
@@ -11,10 +11,11 @@ import {
 } from "./invoke";
 import "./settings.css";
 
-type Pane = "general" | "dictionary" | "history" | "apikey";
+type Pane = "general" | "models" | "dictionary" | "history" | "apikey";
 
 const PANES: { id: Pane; icon: string; label: string }[] = [
   { id: "general",    icon: "◈",  label: "General"    },
+  { id: "models",     icon: "⚙",  label: "Models"     },
   { id: "dictionary", icon: "≡",  label: "Dictionary" },
   { id: "history",    icon: "◷",  label: "History"    },
   { id: "apikey",     icon: "⊙",  label: "API Key"    },
@@ -25,8 +26,12 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [dict, setDict] = useState<Dictionary>({ entries: [] });
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [apiKey, setApiKey] = useState("");
+  const [commonKey, setCommonKey] = useState("");
+  const [sttKey, setSttKey] = useState("");
+  const [llmKey, setLlmKey] = useState("");
   const [keyExists, setKeyExists] = useState(false);
+  const [sttKeyExists, setSttKeyExists] = useState(false);
+  const [llmKeyExists, setLlmKeyExists] = useState(false);
   const [accessibilityOk, setAccessibilityOk] = useState(true);
   const [listenerState, setListenerState] = useState<ActiveShortcut | null>(null);
   const [banner, setBanner] = useState<{ type: "saved" | "error"; text: string } | null>(null);
@@ -34,21 +39,25 @@ export function SettingsPage() {
   const refreshListenerState = () =>
     activeShortcut().then(setListenerState).catch(console.error);
 
+  const refreshKeyStatus = () => {
+    hasApiKey("common").then(setKeyExists).catch(console.error);
+    hasApiKey("stt").then(setSttKeyExists).catch(console.error);
+    hasApiKey("llm").then(setLlmKeyExists).catch(console.error);
+  };
+
   useEffect(() => {
     getSettings()
       .then((s) => setSettings({ ...s, shortcut: s.shortcut.toLowerCase() }))
       .catch(console.error);
     getDictionary().then(setDict).catch(console.error);
-    hasApiKey().then(setKeyExists).catch(console.error);
+    refreshKeyStatus();
     checkAccessibility().then(setAccessibilityOk).catch(console.error);
     refreshListenerState();
 
-    // shortcut-error: リスナー初期化失敗 (parse エラー or CGEventTap 失敗)
     const ul1 = listen<string>("shortcut-error", (e) => {
       flash("error", `ショートカット初期化失敗: ${e.payload}`);
       refreshListenerState();
     });
-    // error: pipeline 側のエラー (マイク権限失敗など)
     const ul2 = listen<string>("error", (e) => {
       flash("error", e.payload);
     });
@@ -83,11 +92,13 @@ export function SettingsPage() {
     catch (e) { flash("error", String(e)); }
   };
 
-  const handleSaveApiKey = async () => {
+  const handleSaveApiKey = async (provider: "stt" | "llm" | "common", key: string) => {
     try {
-      await saveApiKey(apiKey);
-      setKeyExists(true);
-      setApiKey("");
+      await saveApiKey(key, provider);
+      refreshKeyStatus();
+      if (provider === "stt") setSttKey("");
+      else if (provider === "llm") setLlmKey("");
+      else setCommonKey("");
       flash("saved", "APIキーを保存しました ✓");
     } catch (e) { flash("error", String(e)); }
   };
@@ -134,6 +145,13 @@ export function SettingsPage() {
               listenerState={listenerState}
             />
           )}
+          {pane === "models" && (
+            <ModelsPane
+              settings={settings}
+              onChange={setSettings}
+              onSave={handleSaveSettings}
+            />
+          )}
           {pane === "dictionary" && (
             <DictionaryPane dict={dict} onChange={setDict} onSave={handleSaveDict} />
           )}
@@ -142,9 +160,16 @@ export function SettingsPage() {
           )}
           {pane === "apikey" && (
             <ApiKeyPane
-              apiKey={apiKey}
+              separateKeys={settings.separate_api_keys}
+              commonKey={commonKey}
+              sttKey={sttKey}
+              llmKey={llmKey}
               keyExists={keyExists}
-              onChange={setApiKey}
+              sttKeyExists={sttKeyExists}
+              llmKeyExists={llmKeyExists}
+              onCommonKeyChange={setCommonKey}
+              onSttKeyChange={setSttKey}
+              onLlmKeyChange={setLlmKey}
               onSave={handleSaveApiKey}
             />
           )}
@@ -191,10 +216,7 @@ function GeneralPane({
             CoAType を許可してください。
           </div>
           <div className="accessibility-warning-actions">
-            <button
-              className="btn-secondary"
-              onClick={() => openAccessibilitySettings()}
-            >
+            <button className="btn-secondary" onClick={() => openAccessibilitySettings()}>
               システム設定を開く
             </button>
             <button className="btn-secondary" onClick={onRefreshAccessibility}>
@@ -235,12 +257,9 @@ function GeneralPane({
           {listenerState && (
             <div className={`listener-badge listener-badge-${listenerState.status}`}>
               {listenerState.status === "starting" && "⏳ 起動中..."}
-              {listenerState.status === "ok" &&
-                `✓ 有効: ${listenerState.shortcut}`}
-              {listenerState.status === "parse_error" &&
-                `❌ ${listenerState.error}`}
-              {listenerState.status === "tap_failed" &&
-                `❌ ${listenerState.error}`}
+              {listenerState.status === "ok" && `✓ 有効: ${listenerState.shortcut}`}
+              {listenerState.status === "parse_error" && `❌ ${listenerState.error}`}
+              {listenerState.status === "tap_failed" && `❌ ${listenerState.error}`}
             </div>
           )}
         </div>
@@ -290,19 +309,136 @@ function GeneralPane({
         <div className="checkbox-desc">文字起こし後にLLMで辞書と照合して補正します</div>
       </div>
 
-      <div className="divider" />
-      <div className="section-header">API</div>
+      <div className="action-bar">
+        <button className="btn-primary" onClick={onSave}>保存</button>
+      </div>
+    </div>
+  );
+}
+
+// --------------- Models ---------------
+
+const AUTH_KIND_OPTIONS = [
+  { value: "bearer",         label: "Bearer トークン" },
+  { value: "api_key_header", label: "カスタムヘッダー" },
+  { value: "none",           label: "認証なし" },
+];
+
+function authKindTag(k: AuthKind): string {
+  return k.kind;
+}
+
+function buildAuthKind(tag: string, headerName: string): AuthKind {
+  if (tag === "api_key_header") return { kind: "api_key_header", header_name: headerName };
+  if (tag === "none") return { kind: "none" };
+  return { kind: "bearer" };
+}
+
+function ProviderSection({
+  label,
+  config,
+  onChange,
+}: {
+  label: string;
+  config: Settings["stt"];
+  onChange: (c: Settings["stt"]) => void;
+}) {
+  const set = (patch: Partial<typeof config>) => onChange({ ...config, ...patch });
+  const tag = authKindTag(config.auth_kind);
+  const headerName = config.auth_kind.kind === "api_key_header"
+    ? config.auth_kind.header_name
+    : "";
+
+  return (
+    <>
+      <div className="section-header">{label}</div>
 
       <div className="field-row">
-        <span className="field-label">API Base URL</span>
+        <span className="field-label">Base URL</span>
         <div className="field-control">
           <input
             type="text"
-            value={settings.api_base ?? ""}
-            onChange={(e) => set({ api_base: e.target.value })}
+            value={config.base_url}
+            onChange={(e) => set({ base_url: e.target.value })}
+            placeholder="https://api.openai.com"
           />
         </div>
       </div>
+
+      <div className="field-row">
+        <span className="field-label">モデル名</span>
+        <div className="field-control">
+          <input
+            type="text"
+            value={config.model}
+            onChange={(e) => set({ model: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="field-row">
+        <span className="field-label">認証方式</span>
+        <div className="field-control">
+          <select
+            value={tag}
+            onChange={(e) =>
+              set({ auth_kind: buildAuthKind(e.target.value, headerName) })
+            }
+          >
+            {AUTH_KIND_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {tag === "api_key_header" && (
+        <div className="field-row">
+          <span className="field-label">ヘッダー名</span>
+          <div className="field-control">
+            <input
+              type="text"
+              value={headerName}
+              onChange={(e) =>
+                set({ auth_kind: { kind: "api_key_header", header_name: e.target.value } })
+              }
+              placeholder="x-api-key"
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ModelsPane({
+  settings, onChange, onSave,
+}: {
+  settings: Settings;
+  onChange: (s: Settings) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="form-section">
+      <div className="pane-title">モデル設定</div>
+      <p className="models-desc">
+        STT と LLM 補正で使うエンドポイント・モデル名・認証方式を設定します。<br />
+        OpenAI 公式 / 社内エンドポイント / ローカル LLM など OpenAI 互換 API に対応しています。
+      </p>
+
+      <ProviderSection
+        label="STT (音声認識)"
+        config={settings.stt}
+        onChange={(stt) => onChange({ ...settings, stt })}
+      />
+
+      <div className="divider" />
+
+      <ProviderSection
+        label="LLM (辞書補正)"
+        config={settings.llm}
+        onChange={(llm) => onChange({ ...settings, llm })}
+      />
 
       <div className="action-bar">
         <button className="btn-primary" onClick={onSave}>保存</button>
@@ -417,49 +553,117 @@ function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => 
 // --------------- API Key ---------------
 
 function ApiKeyPane({
-  apiKey, keyExists, onChange, onSave,
+  separateKeys,
+  commonKey, sttKey, llmKey,
+  keyExists, sttKeyExists, llmKeyExists,
+  onCommonKeyChange, onSttKeyChange, onLlmKeyChange,
+  onSave,
 }: {
-  apiKey: string;
-  keyExists: boolean;
-  onChange: (k: string) => void;
-  onSave: () => void;
+  separateKeys: boolean;
+  commonKey: string; sttKey: string; llmKey: string;
+  keyExists: boolean; sttKeyExists: boolean; llmKeyExists: boolean;
+  onCommonKeyChange: (k: string) => void;
+  onSttKeyChange: (k: string) => void;
+  onLlmKeyChange: (k: string) => void;
+  onSave: (provider: "stt" | "llm" | "common", key: string) => void;
 }) {
   return (
     <div className="form-section">
       <div className="pane-title">API キー</div>
 
-      {keyExists && (
-        <div className="apikey-status">
-          <span className="apikey-status-icon">✅</span>
-          <span>APIキーは macOS Keychain に保存済みです</span>
-        </div>
-      )}
+      {!separateKeys ? (
+        <>
+          {keyExists && (
+            <div className="apikey-status">
+              <span className="apikey-status-icon">✅</span>
+              <span>APIキーは macOS Keychain に保存済みです</span>
+            </div>
+          )}
+          <div className="field-row">
+            <span className="field-label">共通 API キー</span>
+            <div className="field-control">
+              <input
+                type="password"
+                value={commonKey}
+                onChange={(e) => onCommonKeyChange(e.target.value)}
+                placeholder={keyExists ? "新しいキーで上書きする場合に入力…" : "sk-…"}
+              />
+            </div>
+          </div>
+          <div className="action-bar">
+            <button
+              className="btn-primary"
+              onClick={() => onSave("common", commonKey)}
+              disabled={!commonKey.trim()}
+            >
+              キーを保存
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="section-header">STT (音声認識) キー</div>
+          {sttKeyExists && (
+            <div className="apikey-status">
+              <span>✅ STT キーが Keychain に保存済み</span>
+            </div>
+          )}
+          <div className="field-row">
+            <span className="field-label">STT API キー</span>
+            <div className="field-control">
+              <input
+                type="password"
+                value={sttKey}
+                onChange={(e) => onSttKeyChange(e.target.value)}
+                placeholder={sttKeyExists ? "上書きする場合に入力…" : "sk-…"}
+              />
+            </div>
+          </div>
+          <div className="action-bar">
+            <button
+              className="btn-primary"
+              onClick={() => onSave("stt", sttKey)}
+              disabled={!sttKey.trim()}
+            >
+              STT キーを保存
+            </button>
+          </div>
 
-      <div className="field-row">
-        <span className="field-label">APIキー</span>
-        <div className="field-control">
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={keyExists ? "新しいキーで上書きする場合に入力…" : "mlp-…"}
-          />
-        </div>
-      </div>
+          <div className="divider" />
+          <div className="section-header">LLM (辞書補正) キー</div>
+          {llmKeyExists && (
+            <div className="apikey-status">
+              <span>✅ LLM キーが Keychain に保存済み</span>
+            </div>
+          )}
+          <div className="field-row">
+            <span className="field-label">LLM API キー</span>
+            <div className="field-control">
+              <input
+                type="password"
+                value={llmKey}
+                onChange={(e) => onLlmKeyChange(e.target.value)}
+                placeholder={llmKeyExists ? "上書きする場合に入力…" : "sk-…"}
+              />
+            </div>
+          </div>
+          <div className="action-bar">
+            <button
+              className="btn-primary"
+              onClick={() => onSave("llm", llmKey)}
+              disabled={!llmKey.trim()}
+            >
+              LLM キーを保存
+            </button>
+          </div>
+        </>
+      )}
 
       <div className="hint">
         キーは macOS Keychain (<code>jp.co.cyberagent.coatype</code>) に保存されます。<br />
-        環境変数 <code>COATYPE_API_KEY</code> が設定されている場合はそちらが優先されます。
-      </div>
-
-      <div className="action-bar">
-        <button
-          className="btn-primary"
-          onClick={onSave}
-          disabled={!apiKey.trim()}
-        >
-          キーを保存
-        </button>
+        環境変数 <code>COATYPE_API_KEY</code> が設定されている場合はそちらが優先されます。<br />
+        STT/LLM を個別に設定する場合は <strong>Models</strong> タブの「STT/LLM」設定で
+        <code>separate_api_keys</code> を有効化してください（設定ファイルで直接指定可能）。
       </div>
     </div>
   );
