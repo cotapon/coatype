@@ -34,7 +34,7 @@ fn main() {
             let history = Arc::new(HistoryStore::open(&db_path)?);
 
             let api_key = keychain::resolve_api_key().unwrap_or_default();
-            let whisper = WhisperClient::new(settings.api_base.clone(), api_key);
+            let whisper = WhisperClient::new(settings.stt.base_url.clone(), api_key);
 
             let pipeline = Arc::new(Pipeline::new(
                 whisper,

@@ -1,10 +1,25 @@
+export type AuthKind =
+  | { kind: "bearer" }
+  | { kind: "api_key_header"; header_name: string }
+  | { kind: "none" };
+
+export interface ProviderConfig {
+  base_url: string;
+  model: string;
+  auth_kind: AuthKind;
+}
+
 export interface Settings {
   language: string;
   shortcut: string;
   trigger_mode: "push_to_talk" | "toggle";
   translate_mode: boolean;
   llm_correct: boolean;
-  api_base: string;
+  stt: ProviderConfig;
+  llm: ProviderConfig;
+  separate_api_keys: boolean;
+  /** @deprecated マイグレーション用。新規 JSON には含まれない */
+  api_base?: string;
 }
 
 export interface DictionaryEntry {

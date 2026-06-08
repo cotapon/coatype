@@ -298,7 +298,7 @@ function GeneralPane({
         <div className="field-control">
           <input
             type="text"
-            value={settings.api_base}
+            value={settings.api_base ?? ""}
             onChange={(e) => set({ api_base: e.target.value })}
           />
         </div>
