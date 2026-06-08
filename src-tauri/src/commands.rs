@@ -2,7 +2,7 @@ use crate::config::settings::Settings;
 use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryItem;
 use crate::pipeline::Pipeline;
-use crate::secrets;
+use crate::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_LLM, ACCOUNT_STT};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -37,6 +37,17 @@ pub async fn save_settings(
     *p.translate.lock().unwrap() = settings.translate_mode;
     *p.language.lock().unwrap() = settings.language.clone();
     *p.llm_correct.lock().unwrap() = settings.llm_correct;
+
+    // base_url / model / auth_kind が変わった場合はクライアントを再構築する
+    let stt_key = keychain::resolve_api_key_for(
+        if settings.separate_api_keys { ACCOUNT_STT } else { ACCOUNT_COMMON },
+    ).unwrap_or_default();
+    let llm_key = keychain::resolve_api_key_for(
+        if settings.separate_api_keys { ACCOUNT_LLM } else { ACCOUNT_COMMON },
+    ).unwrap_or_default();
+    p.rebuild_stt_client(&settings.stt, stt_key);
+    p.rebuild_llm_client(&settings.llm, llm_key);
+
     Ok(())
 }
 
@@ -73,19 +84,35 @@ pub async fn clear_history(pipeline: State<'_, Arc<Pipeline>>) -> Result<(), Str
     p.history.clear().map_err(|e| e.to_string())
 }
 
+/// provider: "stt" | "llm" | "common" (デフォルト: common)
 #[tauri::command]
 pub async fn save_api_key(
+    provider: String,
     key: String,
     pipeline: State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
-    secrets::keychain::save_api_key(&key).map_err(|e| e.to_string())?;
-    pipeline.update_api_key(key);
+    let account = provider_to_account(&provider);
+    keychain::save_api_key_for(account, &key).map_err(|e| e.to_string())?;
+    match provider.as_str() {
+        "stt" => pipeline.update_stt_api_key(key),
+        "llm" => pipeline.update_llm_api_key(key),
+        _ => pipeline.update_api_key(key),
+    }
     Ok(())
 }
 
+/// provider: "stt" | "llm" | "common" (デフォルト: common)
 #[tauri::command]
-pub async fn has_api_key() -> bool {
-    secrets::keychain::resolve_api_key().is_ok()
+pub async fn has_api_key(provider: String) -> bool {
+    keychain::has_api_key_for(provider_to_account(&provider))
+}
+
+fn provider_to_account(provider: &str) -> &'static str {
+    match provider {
+        "stt" => ACCOUNT_STT,
+        "llm" => ACCOUNT_LLM,
+        _ => ACCOUNT_COMMON,
+    }
 }
 
 #[tauri::command]
