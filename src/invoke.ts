@@ -10,9 +10,14 @@ export const saveDictionary = (dict: Dictionary) =>
 export const listHistory = (limit: number) =>
   invoke<HistoryItem[]>("list_history", { limit });
 export const clearHistory = () => invoke<void>("clear_history");
-export const saveApiKey = (key: string) =>
-  invoke<void>("save_api_key", { key });
-export const hasApiKey = () => invoke<boolean>("has_api_key");
+
+type ApiKeyProvider = "stt" | "llm" | "common";
+
+export const saveApiKey = (key: string, provider: ApiKeyProvider = "common") =>
+  invoke<void>("save_api_key", { provider, key });
+export const hasApiKey = (provider: ApiKeyProvider = "common") =>
+  invoke<boolean>("has_api_key", { provider });
+
 export const checkAccessibility = () => invoke<boolean>("check_accessibility");
 export const openAccessibilitySettings = () =>
   invoke<void>("open_accessibility_settings");
