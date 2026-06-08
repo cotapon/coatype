@@ -78,18 +78,61 @@ export COATYPE_API_KEY=mlp-your-key-here
 ## 開発
 
 ```bash
-# Tauri 開発サーバー起動
+# Tauri 開発サーバー起動 (Rust + Vite のホットリロード)
 npm run tauri dev
 ```
 
-初回はRustのコンパイルに数分かかります。
+初回はRustのコンパイルに5〜10分かかります。
 
 ### テスト
 
 ```bash
-cd src-tauri
-cargo test
+# プロジェクトルートから実行
+npm test
 ```
+
+テストはすべて [mockito](https://github.com/lipanski/mockito) を使った HTTP モックテストです。実際の API は叩きません。
+
+### デバッグ
+
+#### Rust ログ出力
+
+```bash
+RUST_LOG=debug npm run tauri dev
+```
+
+`tracing` クレートのログがターミナルに出力されます。キーイベント受信・録音開始/終了・Whisper レスポンスなどが確認できます。
+
+特定クレートのみに絞りたい場合:
+
+```bash
+RUST_LOG=coatype=debug,warn npm run tauri dev
+```
+
+#### ショートカットのデバッグ
+
+Settings → **General** ペインに「現在有効: `<キー名>` / 状態: ✓ 有効 | ❌」バッジが表示されます。
+
+- `✓ 有効` — リスナーが起動しキーを監視中
+- `❌` — アクセシビリティ権限がないか、リスナーの起動に失敗
+
+ショートカットが反応しない場合は `RUST_LOG=debug` でキーイベントがアプリに届いているか確認してください。
+
+#### APIキー / Keychain のデバッグ
+
+```bash
+# Keychain に保存されたキーを確認
+security find-generic-password -s "jp.co.cyberagent.coatype" -w
+```
+
+`COATYPE_API_KEY` 環境変数が設定されている場合は Keychain より優先されます。
+
+#### フロントエンド (React) のデバッグ
+
+`npm run tauri dev` 実行中に DevTools を開けます:
+
+- macOS: `Cmd + Option + I`
+- または Settings 画面上で右クリック → 「検証」
 
 ---
 
