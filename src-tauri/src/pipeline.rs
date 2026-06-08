@@ -1,5 +1,6 @@
 use crate::api::whisper::WhisperClient;
 use crate::audio::recorder::Recorder;
+use crate::config::settings::ProviderConfig;
 use crate::dictionary::llm_correct::LlmCorrectClient;
 use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryStore;
@@ -8,8 +9,9 @@ use std::time::Instant;
 
 pub struct Pipeline {
     pub recorder: Mutex<Recorder>,
-    pub client: WhisperClient,
-    pub llm: Option<LlmCorrectClient>,
+    // ダブル Arc パターン: 外側の Mutex で swap、内側の Arc でクローン後に非同期呼び出し
+    pub client: Arc<Mutex<Arc<WhisperClient>>>,
+    pub llm: Arc<Mutex<Option<Arc<LlmCorrectClient>>>>,
     pub dict: Arc<Mutex<Dictionary>>,
     pub history: Arc<HistoryStore>,
     pub translate: Arc<Mutex<bool>>,
@@ -30,8 +32,8 @@ impl Pipeline {
     ) -> Self {
         Self {
             recorder: Mutex::new(Recorder::new()),
-            client,
-            llm,
+            client: Arc::new(Mutex::new(Arc::new(client))),
+            llm: Arc::new(Mutex::new(llm.map(Arc::new))),
             dict: Arc::new(Mutex::new(dict)),
             history,
             translate: Arc::new(Mutex::new(translate)),
@@ -41,9 +43,48 @@ impl Pipeline {
         }
     }
 
+    // ── API キー更新 ──────────────────────────────────────────────
+
     pub fn update_api_key(&self, key: String) {
-        self.client.set_api_key(key);
+        self.client.lock().unwrap().set_api_key(key.clone());
+        if let Some(llm) = &*self.llm.lock().unwrap() {
+            llm.set_api_key(key);
+        }
     }
+
+    pub fn update_stt_api_key(&self, key: String) {
+        self.client.lock().unwrap().set_api_key(key);
+    }
+
+    pub fn update_llm_api_key(&self, key: String) {
+        if let Some(llm) = &*self.llm.lock().unwrap() {
+            llm.set_api_key(key);
+        }
+    }
+
+    // ── クライアント再構築 (base_url / model / auth_kind 変更時) ─
+
+    pub fn rebuild_stt_client(&self, config: &ProviderConfig, api_key: String) {
+        let new_client = Arc::new(WhisperClient::new(
+            config.base_url.clone(),
+            config.model.clone(),
+            config.auth_kind.clone(),
+            api_key,
+        ));
+        *self.client.lock().unwrap() = new_client;
+    }
+
+    pub fn rebuild_llm_client(&self, config: &ProviderConfig, api_key: String) {
+        let new_client = Arc::new(LlmCorrectClient::new(
+            config.base_url.clone(),
+            config.model.clone(),
+            config.auth_kind.clone(),
+            api_key,
+        ));
+        *self.llm.lock().unwrap() = Some(new_client);
+    }
+
+    // ── 録音 / 処理 ───────────────────────────────────────────────
 
     pub fn start(&self) -> anyhow::Result<()> {
         self.recorder.lock().unwrap().start()?;
@@ -70,10 +111,13 @@ impl Pipeline {
 
         let translate = *self.translate.lock().unwrap();
         let language = self.language.lock().unwrap().clone();
+
+        // Arc<WhisperClient> をクローンしてロックを解放してから await
+        let client = self.client.lock().unwrap().clone();
         let raw = if translate {
-            self.client.translate(&wav).await?
+            client.translate(&wav).await?
         } else {
-            self.client.transcribe(&wav, &language, None).await?
+            client.transcribe(&wav, &language, None).await?
         };
 
         // 高速パス: 完全一致置換 (常時)
@@ -81,7 +125,9 @@ impl Pipeline {
 
         // LLM 補正パス (設定 ON かつ llm クライアントあり)
         let final_text = if *self.llm_correct.lock().unwrap() {
-            if let Some(llm) = &self.llm {
+            // Arc<LlmCorrectClient> をクローンしてロックを解放してから await
+            let llm_opt = self.llm.lock().unwrap().clone();
+            if let Some(llm) = llm_opt {
                 let entries: Vec<(String, String)> = self
                     .dict
                     .lock()
