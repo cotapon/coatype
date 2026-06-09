@@ -136,17 +136,32 @@ security find-generic-password -s "jp.co.cyberagent.coatype" -w
 
 ---
 
-## ビルド (配布用)
+## 配布 (社内リリース手順)
+
+### リリースビルド
 
 ```bash
-npm run tauri build
+./scripts/release.sh
 ```
 
-成果物: `src-tauri/target/release/bundle/macos/CoAType.app`
+Apple Silicon + Intel の universal binary DMG が生成されます。  
+出力された DMG を社内ストレージ (Google Drive / Slack 等) にアップロードして配布リンクを共有してください。
 
-### 署名と公証 (notarization)
+### インストール手順 (受け取り手向け)
 
-`TAURI_SIGNING_PRIVATE_KEY` と Apple Developer証明書が必要です。詳細は [Tauri v2 Code Signing](https://v2.tauri.app/distribute/sign/) を参照。
+1. DMG をダウンロードしてダブルクリック → `CoAType.app` を `/Applications` にドラッグ
+2. **初回起動**: Gatekeeper の警告が出るため、`/Applications/CoAType.app` を **右クリック → 開く** → ダイアログの「開く」をクリック
+   - または: 一度ダブルクリック → 警告 → システム設定 → プライバシーとセキュリティ → 下部の「開く」
+3. **アクセシビリティ権限を付与**: システム設定 → プライバシーとセキュリティ → アクセシビリティ → CoAType をオンに
+4. API キーを設定: メニューバーアイコン → Settings → **API Key** タブ
+5. ショートカットで録音 → 文字起こし → 挿入 を確認
+
+> **注意**: 本アプリは ad-hoc 署名 (Apple Developer ID なし) のため初回起動時に警告が出ます。これは仕様です。  
+> 警告を消したい場合: `xattr -dr com.apple.quarantine /Applications/CoAType.app` をターミナルで実行してください。
+
+### 署名と自動アップデート (v2 予定)
+
+v2 以降で Apple Developer ID 証明書の取得・Notarization・Tauri Updater による自動配信を予定しています。
 
 ---
 
