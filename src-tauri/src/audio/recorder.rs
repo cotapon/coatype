@@ -61,9 +61,23 @@ impl Recorder {
     }
 
     pub fn stop(&mut self) -> Vec<u8> {
-        self.stream.take();
+        // サンプルを先に回収してからストリームを解放する。
+        // cpal::Stream の drop は CoreAudio スレッドとの同期を取るため、
+        // CFRunLoop を持たない tokio ワーカースレッドではデッドロックする。
+        // 別スレッドで drop することで回避する。
+        tracing::debug!("recorder: locking samples");
         let samples = self.samples.lock().unwrap().clone();
-        samples_to_wav(&samples, self.sample_rate)
+        let rate = self.sample_rate;
+        tracing::debug!("recorder: {} samples collected, releasing stream on background thread", samples.len());
+        if let Some(stream) = self.stream.take() {
+            // cpal::Stream は !Send だが、CoreAudio スレッドから離れた
+            // スレッドで drop するだけなので実質安全。
+            struct SendStream(cpal::Stream);
+            unsafe impl Send for SendStream {}
+            let s = SendStream(stream);
+            std::thread::spawn(move || drop(s));
+        }
+        samples_to_wav(&samples, rate)
     }
 }
 

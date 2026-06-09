@@ -94,13 +94,20 @@ impl Pipeline {
     // ── 録音 / 処理 ───────────────────────────────────────────────
 
     pub fn start(&self) -> anyhow::Result<()> {
+        tracing::info!("recording: start");
         self.recorder.lock().unwrap().start()?;
         *self.started_at.lock().unwrap() = Some(Instant::now());
         Ok(())
     }
 
     pub async fn stop_and_process(&self) -> anyhow::Result<String> {
-        let wav = self.recorder.lock().unwrap().stop();
+        tracing::info!("stop_and_process: acquiring recorder lock");
+        let wav = {
+            let mut rec = self.recorder.lock().unwrap();
+            tracing::info!("stop_and_process: lock acquired, calling stop()");
+            rec.stop()
+        };
+        tracing::info!("stop_and_process: recorder.stop() returned");
         let elapsed = self
             .started_at
             .lock()
@@ -108,29 +115,38 @@ impl Pipeline {
             .take()
             .map(|s| s.elapsed().as_millis() as i64)
             .unwrap_or(0);
+        tracing::info!("recording: stop ({elapsed}ms, {} bytes)", wav.len());
+
         if wav.len() <= 44 {
+            tracing::debug!("wav too short, skipping");
             return Ok(String::new());
         }
         if wav_is_silent(&wav) {
-            tracing::debug!("silent audio, skipping transcription");
+            tracing::info!("silent audio, skipping transcription");
             return Ok(String::new());
         }
 
         let translate = *self.translate.lock().unwrap();
         let language = self.language.lock().unwrap().clone();
 
+        tracing::info!("stt: request (translate={translate}, language={language})");
         let client = self.client.lock().unwrap().clone();
         let raw = if translate {
             client.translate(&wav).await?
         } else {
             client.transcribe(&wav, &language, None).await?
         };
+        tracing::info!("stt: response {:?}", raw);
 
         let after_dict = self.dict.lock().unwrap().apply(&raw);
+        if after_dict != raw {
+            tracing::debug!("dict: {:?} -> {:?}", raw, after_dict);
+        }
 
         let final_text = if *self.llm_correct.lock().unwrap() {
             let llm_opt = self.llm.lock().unwrap().clone();
             if let Some(llm) = llm_opt {
+                tracing::info!("llm: correct request");
                 let entries: Vec<(String, String)> = self
                     .dict
                     .lock()
@@ -139,8 +155,14 @@ impl Pipeline {
                     .iter()
                     .map(|e| (e.from.clone(), e.to.clone()))
                     .collect();
-                llm.correct(&after_dict, &entries).await.unwrap_or(after_dict)
+                let result = llm.correct(&after_dict, &entries).await.unwrap_or_else(|e| {
+                    tracing::warn!("llm: correct failed: {e}");
+                    after_dict.clone()
+                });
+                tracing::info!("llm: result {:?}", result);
+                result
             } else {
+                tracing::debug!("llm: skipped (no client)");
                 after_dict
             }
         } else {

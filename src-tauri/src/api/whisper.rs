@@ -72,15 +72,18 @@ impl WhisperClient {
 
     async fn post(&self, path: &str, form: Form) -> Result<String, ApiError> {
         let url = format!("{}{}", self.base, path);
+        tracing::debug!("whisper: POST {url}");
         let key = self.api_key.lock().unwrap().clone();
         let resp = apply_auth(self.http.post(&url), &self.auth_kind, &key)
             .multipart(form)
             .send()
             .await?;
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
+        let status = resp.status();
+        tracing::debug!("whisper: response status {status}");
+        if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(ApiError::Status { status, body });
+            tracing::error!("whisper: error {}: {body}", status.as_u16());
+            return Err(ApiError::Status { status: status.as_u16(), body });
         }
         let parsed: WhisperResponse = resp.json().await?;
         Ok(parsed.text)

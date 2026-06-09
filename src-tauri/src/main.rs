@@ -13,7 +13,7 @@ use coatype_lib::pipeline::{CurrentTask, Pipeline};
 use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_LLM, ACCOUNT_STT};
 use coatype_lib::shortcut::listener::{self, RecordMode, ShortcutEvent};
 use std::sync::atomic::AtomicBool;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
@@ -118,7 +118,9 @@ fn main() {
                 .build(app)?;
 
             // ショートカット監視 → パイプライン
-            let (tx, rx) = mpsc::channel::<ShortcutEvent>();
+            // tokio 非同期チャンネルを使うことで recv().await が tokio スケジューラに
+            // 制御を返し、spawn したタスクが同じスレッドで実行できるようになる。
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ShortcutEvent>();
             listener::start(bindings_arc, paused_arc, tx, active_shortcut_state, app.handle().clone());
 
             let handle = app.handle().clone();
@@ -131,7 +133,7 @@ fn main() {
                 let mut is_recording = false;
 
                 loop {
-                    let Ok(ev) = rx.recv() else { break };
+                    let Some(ev) = rx.recv().await else { break };
                     match ev {
                         ShortcutEvent::StartRecording { mode, .. } => {
                             let should_start = match mode {
@@ -240,6 +242,7 @@ fn spawn_stop_and_process(
     handle: &tauri::AppHandle,
     pid: Option<i32>,
 ) {
+    tracing::info!("pipeline: processing start");
     let _ = handle.emit("recording-state", "processing");
     show_overlay_panel(handle);
 
@@ -249,6 +252,7 @@ fn spawn_stop_and_process(
     let join = tokio::spawn(async move {
         match pipeline_task.stop_and_process().await {
             Ok(text) if !text.is_empty() => {
+                tracing::info!("pipeline: done, injecting text ({} chars)", text.len());
                 let _ = handle_task.emit("transcribed", text.clone());
                 let _ = handle_task.run_on_main_thread(move || {
                     #[cfg(target_os = "macos")]
@@ -261,7 +265,9 @@ fn spawn_stop_and_process(
                     }
                 });
             }
-            Ok(_) => {}
+            Ok(_) => {
+                tracing::info!("pipeline: done, no text to inject");
+            }
             Err(e) => {
                 tracing::error!("pipeline error: {e}");
                 let _ = handle_task.emit("error", e.to_string());

@@ -1,3 +1,4 @@
+#![allow(static_mut_refs, improper_ctypes_definitions)]
 //! Simple library to listen and send events to keyboard and mouse on MacOS, Windows and Linux
 //! (x11).
 //!
