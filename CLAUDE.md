@@ -37,7 +37,7 @@ src-tauri/src/
 
 **Tauri ウィンドウ:**
 - `settings` (720×560): 設定UI。× ボタンで閉じず非表示にする (再表示のため)
-- `overlay` (220×60): 録音中インジケーター。always-on-top、transparent
+- `overlay` (220×60): 録音中オーバーレイ。always-on-top、transparent
 
 **State 管理:**
 - `Arc<Pipeline>` を `app.manage` — 全コマンドから共有
