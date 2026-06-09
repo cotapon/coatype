@@ -3,7 +3,7 @@ pub mod audio;
 pub mod commands;
 pub mod config;
 pub mod dictionary;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod focus;
 pub mod history;
 pub mod injector;

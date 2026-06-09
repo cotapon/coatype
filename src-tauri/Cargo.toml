@@ -31,10 +31,10 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 cpal = "0.15"
 hound = "3.5"
-rdev = "0.5"
+rdev = { version = "0.5", features = ["unstable_grab"] }
 enigo = "0.2"
 reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"] }
-keyring = { version = "3", features = ["apple-native"] }
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 dotenvy = "0.15"
 chrono = { version = "0.4", features = ["serde"] }
@@ -44,6 +44,13 @@ arboard = "3"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSRunningApplication", "NSWindow", "NSWorkspace"] }
 objc2-foundation = "0.3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 mockito = "1"

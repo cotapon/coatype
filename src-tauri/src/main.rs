@@ -160,7 +160,7 @@ fn main() {
                             };
 
                             if should_start {
-                                #[cfg(target_os = "macos")]
+                                #[cfg(any(target_os = "macos", target_os = "windows"))]
                                 {
                                     *prev_pid.lock().unwrap() =
                                         coatype_lib::focus::capture_frontmost_pid();
@@ -254,6 +254,10 @@ fn show_overlay_panel(handle: &tauri::AppHandle) {
                 coatype_lib::focus::show_panel(ns_win);
                 return;
             }
+            #[cfg(target_os = "windows")]
+            {
+                coatype_lib::focus::show_panel(std::ptr::null_mut());
+            }
             let _ = w.show();
         }
     });
@@ -280,7 +284,7 @@ fn spawn_stop_and_process(
                 tracing::info!("pipeline: done, injecting text ({} chars)", text.len());
                 let _ = handle_task.emit("transcribed", text.clone());
                 let _ = handle_task.run_on_main_thread(move || {
-                    #[cfg(target_os = "macos")]
+                    #[cfg(any(target_os = "macos", target_os = "windows"))]
                     if let Some(p) = pid {
                         coatype_lib::focus::restore_frontmost(p);
                         std::thread::sleep(std::time::Duration::from_millis(80));

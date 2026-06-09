@@ -334,9 +334,10 @@ pub use crate::windows::grab as _grab;
 /// Grabbing global events. In the callback, returning None consumes the event
 /// (it will not be delivered to other applications), and returning Some(event)
 /// lets it pass through. Available on macOS without any feature flag.
+/// On Windows, requires the `unstable_grab` feature.
 ///
 /// Requires Accessibility permission on macOS.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", all(target_os = "windows", feature = "unstable_grab")))]
 pub fn grab<T>(callback: T) -> Result<(), GrabError>
 where
     T: FnMut(Event) -> Option<Event> + 'static,
