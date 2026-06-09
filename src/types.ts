@@ -26,6 +26,7 @@ export interface Settings {
   stt: ProviderConfig;
   llm: ProviderConfig;
   separate_api_keys: boolean;
+  show_overlay: boolean;
 }
 
 export interface DictionaryEntry {
