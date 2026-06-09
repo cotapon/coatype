@@ -3,7 +3,7 @@
 use coatype_lib::api::whisper::WhisperClient;
 use coatype_lib::commands::{
     ActiveShortcut, DictPath, ListenerBindings, ListenerPaused, ListenerState, SettingsPath,
-    bindings_to_registered,
+    ShowOverlay, bindings_to_registered,
 };
 use coatype_lib::config::settings::Settings;
 use coatype_lib::dictionary::llm_correct::LlmCorrectClient;
@@ -12,7 +12,7 @@ use coatype_lib::history::store::HistoryStore;
 use coatype_lib::pipeline::{CurrentTask, Pipeline};
 use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_LLM, ACCOUNT_STT};
 use coatype_lib::shortcut::listener::{self, RecordMode, ShortcutEvent};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -86,6 +86,9 @@ fn main() {
             app.manage(ListenerBindings(bindings_arc.clone()));
             app.manage(ListenerPaused(paused_arc.clone()));
 
+            let show_overlay_arc = Arc::new(AtomicBool::new(settings.show_overlay));
+            app.manage(ShowOverlay(show_overlay_arc.clone()));
+
             // 設定ウィンドウの × は閉じる代わりに隠す
             if let Some(settings_win) = app.get_webview_window("settings") {
                 let settings_win2 = settings_win.clone();
@@ -128,6 +131,7 @@ fn main() {
             let prev_app_pid: Arc<Mutex<Option<i32>>> = Arc::new(Mutex::new(None));
             let prev_pid = prev_app_pid.clone();
 
+            let show_overlay_for_task = show_overlay_arc.clone();
             tauri::async_runtime::spawn(async move {
                 // HandsFree バインドのトグル状態を main ループで管理
                 let mut is_recording = false;
@@ -146,6 +150,7 @@ fn main() {
                                             &pipeline_clone,
                                             &handle,
                                             prev_pid.lock().unwrap().take(),
+                                            show_overlay_for_task.load(Ordering::Relaxed),
                                         );
                                         false
                                     } else {
@@ -164,7 +169,9 @@ fn main() {
                                     Ok(()) => {
                                         is_recording = true;
                                         let _ = handle.emit("recording-state", "started");
-                                        show_overlay_panel(&handle);
+                                        if show_overlay_for_task.load(Ordering::Relaxed) {
+                                            show_overlay_panel(&handle);
+                                        }
                                     }
                                     Err(e) => {
                                         tracing::error!("record start error: {e}");
@@ -180,6 +187,7 @@ fn main() {
                                 &pipeline_clone,
                                 &handle,
                                 prev_pid.lock().unwrap().take(),
+                                show_overlay_for_task.load(Ordering::Relaxed),
                             );
                         }
                         ShortcutEvent::Cancel => {
@@ -227,6 +235,18 @@ fn show_overlay_panel(handle: &tauri::AppHandle) {
     let h = handle.clone();
     let _ = handle.run_on_main_thread(move || {
         if let Some(w) = h.get_webview_window("overlay") {
+            // 画面下部中央に位置を設定 (物理ピクセル)
+            if let Ok(Some(monitor)) = w.current_monitor() {
+                let scale = monitor.scale_factor();
+                let screen_size = monitor.size();
+                let screen_pos = monitor.position();
+                let overlay_w = (220.0 * scale) as i32;
+                let overlay_h = (60.0 * scale) as i32;
+                let margin = (40.0 * scale) as i32;
+                let x = screen_pos.x + (screen_size.width as i32 - overlay_w) / 2;
+                let y = screen_pos.y + screen_size.height as i32 - overlay_h - margin;
+                let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+            }
             #[cfg(target_os = "macos")]
             if let Ok(ns_win) = w.ns_window() {
                 coatype_lib::focus::show_panel(ns_win);
@@ -241,10 +261,13 @@ fn spawn_stop_and_process(
     pipeline: &Arc<Pipeline>,
     handle: &tauri::AppHandle,
     pid: Option<i32>,
+    show_overlay: bool,
 ) {
     tracing::info!("pipeline: processing start");
     let _ = handle.emit("recording-state", "processing");
-    show_overlay_panel(handle);
+    if show_overlay {
+        show_overlay_panel(handle);
+    }
 
     let pipeline_task = pipeline.clone();
     let handle_task = handle.clone();
