@@ -276,6 +276,19 @@ function GeneralPane({
         <div className="checkbox-desc">文字起こし後にLLMで辞書と照合して補正します</div>
       </div>
 
+      <div>
+        <div className="checkbox-row">
+          <input
+            type="checkbox"
+            id="show_overlay"
+            checked={settings.show_overlay}
+            onChange={(e) => set({ show_overlay: e.target.checked })}
+          />
+          <label className="checkbox-label" htmlFor="show_overlay">録音中オーバーレイを表示する</label>
+        </div>
+        <div className="checkbox-desc">録音・処理中にインジケーターを画面下部に表示します</div>
+      </div>
+
       <div className="action-bar">
         <button className="btn-primary" onClick={onSave}>保存</button>
       </div>
@@ -693,6 +706,15 @@ function DictionaryPane({
 // --------------- History ---------------
 
 function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => void }) {
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  const handleCopy = (id: number, text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
+
   return (
     <div className="form-section">
       <div className="pane-title">文字起こし履歴</div>
@@ -709,11 +731,19 @@ function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => 
         <ul className="history-list">
           {items.map((item) => (
             <li key={item.id} className="history-item">
-              <div className="history-text">{item.text}</div>
-              <div className="history-meta">
-                {item.created_at} · {item.language}
-                {item.translated ? " → 英語" : ""} · {item.duration_ms}ms
+              <div className="history-item-content">
+                <div className="history-text">{item.text}</div>
+                <div className="history-meta">
+                  {item.created_at} · {item.language}
+                  {item.translated ? " → 英語" : ""} · {item.duration_ms}ms
+                </div>
               </div>
+              <button
+                className={`btn-icon-sm history-copy-btn${copiedId === item.id ? " history-copy-btn--copied" : ""}`}
+                onClick={() => handleCopy(item.id, item.text)}
+              >
+                {copiedId === item.id ? "✓ コピー済み" : "コピー"}
+              </button>
             </li>
           ))}
         </ul>
