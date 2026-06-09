@@ -1,14 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use coatype_lib::api::whisper::WhisperClient;
+use coatype_lib::commands::{
+    ActiveShortcut, DictPath, ListenerBindings, ListenerPaused, ListenerState, SettingsPath,
+    bindings_to_registered,
+};
+use coatype_lib::config::settings::Settings;
 use coatype_lib::dictionary::llm_correct::LlmCorrectClient;
-use coatype_lib::commands::{ActiveShortcut, DictPath, ListenerState, SettingsPath};
-use coatype_lib::config::settings::{Settings, TriggerMode};
 use coatype_lib::dictionary::replace::Dictionary;
 use coatype_lib::history::store::HistoryStore;
-use coatype_lib::pipeline::Pipeline;
-use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_STT, ACCOUNT_LLM};
-use coatype_lib::shortcut::listener::{self, ShortcutEvent};
+use coatype_lib::pipeline::{CurrentTask, Pipeline};
+use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_LLM, ACCOUNT_STT};
+use coatype_lib::shortcut::listener::{self, RecordMode, ShortcutEvent};
+use std::sync::atomic::AtomicBool;
 use std::sync::{mpsc, Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -36,10 +40,12 @@ fn main() {
 
             let stt_key = keychain::resolve_api_key_for(
                 if settings.separate_api_keys { ACCOUNT_STT } else { ACCOUNT_COMMON },
-            ).unwrap_or_default();
+            )
+            .unwrap_or_default();
             let llm_key = keychain::resolve_api_key_for(
                 if settings.separate_api_keys { ACCOUNT_LLM } else { ACCOUNT_COMMON },
-            ).unwrap_or_default();
+            )
+            .unwrap_or_default();
 
             let whisper = WhisperClient::new(
                 settings.stt.base_url.clone(),
@@ -64,23 +70,23 @@ fn main() {
                 settings.llm_correct,
             ));
 
-            let trigger_str = match settings.trigger_mode {
-                TriggerMode::PushToTalk => "push_to_talk",
-                TriggerMode::Toggle => "toggle",
-            };
-            let active_shortcut_state = Arc::new(std::sync::Mutex::new(ActiveShortcut {
-                shortcut: settings.shortcut.clone(),
-                trigger_mode: trigger_str.to_string(),
+            let active_shortcut_state = Arc::new(Mutex::new(ActiveShortcut {
                 status: "starting".to_string(),
                 error: None,
             }));
+
+            let registered_bindings = bindings_to_registered(&settings.bindings);
+            let bindings_arc = Arc::new(Mutex::new(registered_bindings));
+            let paused_arc = Arc::new(AtomicBool::new(false));
 
             app.manage(pipeline.clone());
             app.manage(SettingsPath(settings_path));
             app.manage(DictPath(dict_path));
             app.manage(ListenerState(active_shortcut_state.clone()));
+            app.manage(ListenerBindings(bindings_arc.clone()));
+            app.manage(ListenerPaused(paused_arc.clone()));
 
-            // 設定ウィンドウの × は閉じる代わりに隠す（再表示できなくなるのを防ぐ）
+            // 設定ウィンドウの × は閉じる代わりに隠す
             if let Some(settings_win) = app.get_webview_window("settings") {
                 let settings_win2 = settings_win.clone();
                 settings_win.on_window_event(move |event| {
@@ -113,97 +119,82 @@ fn main() {
 
             // ショートカット監視 → パイプライン
             let (tx, rx) = mpsc::channel::<ShortcutEvent>();
-            listener::start(
-                settings.trigger_mode,
-                settings.shortcut.clone(),
-                tx,
-                active_shortcut_state,
-                app.handle().clone(),
-            );
+            listener::start(bindings_arc, paused_arc, tx, active_shortcut_state, app.handle().clone());
 
             let handle = app.handle().clone();
             let pipeline_clone = pipeline.clone();
-            // キー押下時点のフロントアプリ PID を保持し、注入前に復元するための状態
             let prev_app_pid: Arc<Mutex<Option<i32>>> = Arc::new(Mutex::new(None));
             let prev_pid = prev_app_pid.clone();
+
             tauri::async_runtime::spawn(async move {
+                // HandsFree バインドのトグル状態を main ループで管理
+                let mut is_recording = false;
+
                 loop {
                     let Ok(ev) = rx.recv() else { break };
                     match ev {
-                        ShortcutEvent::StartRecording => {
-                            // overlay を表示する前に現在のフロントアプリを記録する
-                            #[cfg(target_os = "macos")]
-                            {
-                                *prev_pid.lock().unwrap() =
-                                    coatype_lib::focus::capture_frontmost_pid();
-                            }
-
-                            match pipeline_clone.start() {
-                                Ok(()) => {
-                                    let _ = handle.emit("recording-state", "started");
-                                    // フォーカスを奪わずに overlay を表示する
-                                    let h = handle.clone();
-                                    let _ = handle.run_on_main_thread(move || {
-                                        if let Some(w) = h.get_webview_window("overlay") {
-                                            #[cfg(target_os = "macos")]
-                                            if let Ok(ns_win) = w.ns_window() {
-                                                coatype_lib::focus::show_panel(ns_win);
-                                                return;
-                                            }
-                                            let _ = w.show();
-                                        }
-                                    });
+                        ShortcutEvent::StartRecording { mode, .. } => {
+                            let should_start = match mode {
+                                RecordMode::PushToTalk => true,
+                                RecordMode::HandsFree => {
+                                    if is_recording {
+                                        // トグルオフ: 処理を開始
+                                        is_recording = false;
+                                        spawn_stop_and_process(
+                                            &pipeline_clone,
+                                            &handle,
+                                            prev_pid.lock().unwrap().take(),
+                                        );
+                                        false
+                                    } else {
+                                        true
+                                    }
                                 }
-                                Err(e) => {
-                                    tracing::error!("record start error: {e}");
-                                    let _ = handle.emit("error", format!("録音開始失敗: {e}"));
+                            };
+
+                            if should_start {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    *prev_pid.lock().unwrap() =
+                                        coatype_lib::focus::capture_frontmost_pid();
+                                }
+                                match pipeline_clone.start() {
+                                    Ok(()) => {
+                                        is_recording = true;
+                                        let _ = handle.emit("recording-state", "started");
+                                        show_overlay_panel(&handle);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("record start error: {e}");
+                                        let _ = handle
+                                            .emit("error", format!("録音開始失敗: {e}"));
+                                    }
                                 }
                             }
                         }
-                        ShortcutEvent::StopRecording => {
-                            let _ = handle.emit("recording-state", "processing");
-                            // processing 中も overlay をフォーカス奪取なしで表示
-                            let h2 = handle.clone();
-                            let _ = handle.run_on_main_thread(move || {
-                                if let Some(w) = h2.get_webview_window("overlay") {
-                                    #[cfg(target_os = "macos")]
-                                    if let Ok(ns_win) = w.ns_window() {
-                                        coatype_lib::focus::show_panel(ns_win);
-                                        return;
-                                    }
-                                    let _ = w.show();
-                                }
-                            });
-
-                            let pid = prev_pid.lock().unwrap().take();
-                            match pipeline_clone.stop_and_process().await {
-                                Ok(text) => {
-                                    let _ = handle.emit("transcribed", text.clone());
-                                    let t = text.clone();
-                                    // enigo は TSM API (HIToolbox) を呼ぶため main thread 必須。
-                                    // 注入前に元のアプリのフォーカスを復元する。
-                                    let _ = handle.run_on_main_thread(move || {
-                                        #[cfg(target_os = "macos")]
-                                        if let Some(p) = pid {
-                                            coatype_lib::focus::restore_frontmost(p);
-                                            std::thread::sleep(
-                                                std::time::Duration::from_millis(80),
-                                            );
-                                        }
-                                        if let Err(e) = coatype_lib::injector::insert(&t) {
-                                            tracing::error!("inject error: {e}");
-                                        }
-                                    });
-                                }
-                                Err(e) => {
-                                    tracing::error!("pipeline error: {e}");
-                                    let _ = handle.emit("error", e.to_string());
-                                }
-                            }
+                        ShortcutEvent::StopRecording { .. } => {
+                            is_recording = false;
+                            spawn_stop_and_process(
+                                &pipeline_clone,
+                                &handle,
+                                prev_pid.lock().unwrap().take(),
+                            );
+                        }
+                        ShortcutEvent::Cancel => {
+                            is_recording = false;
+                            pipeline_clone.cancel();
                             let _ = handle.emit("recording-state", "idle");
-
                             if let Some(w) = handle.get_webview_window("overlay") {
                                 let _ = w.hide();
+                            }
+                        }
+                        ShortcutEvent::PasteLast => {
+                            if let Some(text) = pipeline_clone.last_transcription() {
+                                let _ = handle.run_on_main_thread(move || {
+                                    if let Err(e) = coatype_lib::injector::insert(&text) {
+                                        tracing::error!("paste_last inject error: {e}");
+                                    }
+                                });
                             }
                         }
                     }
@@ -224,7 +215,65 @@ fn main() {
             coatype_lib::commands::check_accessibility,
             coatype_lib::commands::open_accessibility_settings,
             coatype_lib::commands::active_shortcut,
+            coatype_lib::commands::set_listener_paused,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CoAType");
+}
+
+fn show_overlay_panel(handle: &tauri::AppHandle) {
+    let h = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Some(w) = h.get_webview_window("overlay") {
+            #[cfg(target_os = "macos")]
+            if let Ok(ns_win) = w.ns_window() {
+                coatype_lib::focus::show_panel(ns_win);
+                return;
+            }
+            let _ = w.show();
+        }
+    });
+}
+
+fn spawn_stop_and_process(
+    pipeline: &Arc<Pipeline>,
+    handle: &tauri::AppHandle,
+    pid: Option<i32>,
+) {
+    let _ = handle.emit("recording-state", "processing");
+    show_overlay_panel(handle);
+
+    let pipeline_task = pipeline.clone();
+    let handle_task = handle.clone();
+
+    let join = tokio::spawn(async move {
+        match pipeline_task.stop_and_process().await {
+            Ok(text) if !text.is_empty() => {
+                let _ = handle_task.emit("transcribed", text.clone());
+                let _ = handle_task.run_on_main_thread(move || {
+                    #[cfg(target_os = "macos")]
+                    if let Some(p) = pid {
+                        coatype_lib::focus::restore_frontmost(p);
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                    }
+                    if let Err(e) = coatype_lib::injector::insert(&text) {
+                        tracing::error!("inject error: {e}");
+                    }
+                });
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("pipeline error: {e}");
+                let _ = handle_task.emit("error", e.to_string());
+            }
+        }
+        let _ = handle_task.emit("recording-state", "idle");
+        if let Some(w) = handle_task.get_webview_window("overlay") {
+            let _ = w.hide();
+        }
+        // タスク完了時に current_task を解放
+        *pipeline_task.current_task.lock().unwrap() = None;
+    });
+
+    *pipeline.current_task.lock().unwrap() = Some(CurrentTask { join });
 }

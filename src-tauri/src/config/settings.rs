@@ -10,6 +10,23 @@ pub enum TriggerMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionKind {
+    StartRecord,
+    HandsFree,
+    Cancel,
+    PasteLast,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeyBinding {
+    pub id: String,
+    pub action: ActionKind,
+    pub combo: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderConfig {
     pub base_url: String,
     pub model: String,
@@ -26,8 +43,8 @@ impl Default for ProviderConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
     pub language: String,
-    pub shortcut: String,
-    pub trigger_mode: TriggerMode,
+    #[serde(default)]
+    pub bindings: Vec<KeyBinding>,
     pub translate_mode: bool,
     pub translate_model: Option<String>,
     pub llm_correct: bool,
@@ -37,9 +54,14 @@ pub struct Settings {
     pub llm: ProviderConfig,
     #[serde(default)]
     pub separate_api_keys: bool,
-    // 旧 api_base フィールドの読み取り専用エイリアス。load 後に stt/llm へ転写され None になる。
+    // 旧 api_base フィールドの読み取り専用エイリアス
     #[serde(default, rename = "api_base", skip_serializing_if = "Option::is_none")]
     pub legacy_api_base: Option<String>,
+    // 旧 shortcut/trigger_mode: マイグレーション用 (読み取りのみ、書き込み時は省略)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_mode: Option<TriggerMode>,
 }
 
 impl Default for Settings {
@@ -47,8 +69,12 @@ impl Default for Settings {
         let base = Self::default_base();
         Self {
             language: "ja".into(),
-            shortcut: "rightoption".into(),
-            trigger_mode: TriggerMode::PushToTalk,
+            bindings: vec![KeyBinding {
+                id: "default-0".to_string(),
+                action: ActionKind::StartRecord,
+                combo: "rightoption".to_string(),
+                enabled: true,
+            }],
             translate_mode: false,
             translate_model: None,
             llm_correct: false,
@@ -64,6 +90,8 @@ impl Default for Settings {
             },
             separate_api_keys: false,
             legacy_api_base: None,
+            shortcut: None,
+            trigger_mode: None,
         }
     }
 }
@@ -73,9 +101,10 @@ impl Settings {
         "https://genai.mlplatform.apis.platform.cycloud.jp".to_string()
     }
 
-    /// 旧 api_base フィールドを stt/llm に転写し、空のモデル名にデフォルトを充填する。
     fn migrate_legacy(&mut self) {
         let base = Self::default_base();
+
+        // 旧 api_base を stt/llm に転写
         if let Some(old) = self.legacy_api_base.take() {
             if self.stt.base_url.is_empty() {
                 self.stt.base_url = old.clone();
@@ -95,6 +124,25 @@ impl Settings {
         }
         if self.llm.model.is_empty() {
             self.llm.model = "gpt-4o-mini".into();
+        }
+
+        // 旧 shortcut/trigger_mode を bindings に変換
+        if self.bindings.is_empty() {
+            let combo = self.shortcut.take().unwrap_or_else(|| "rightoption".to_string());
+            let action = match self.trigger_mode.take().unwrap_or(TriggerMode::PushToTalk) {
+                TriggerMode::PushToTalk => ActionKind::StartRecord,
+                TriggerMode::Toggle => ActionKind::HandsFree,
+            };
+            self.bindings.push(KeyBinding {
+                id: "migrated-0".to_string(),
+                action,
+                combo,
+                enabled: true,
+            });
+        } else {
+            // bindings が既にある場合は旧フィールドを消すだけ
+            self.shortcut = None;
+            self.trigger_mode = None;
         }
     }
 
@@ -124,8 +172,9 @@ mod tests {
     fn default_settings_are_sane() {
         let s = Settings::default();
         assert_eq!(s.language, "ja");
-        assert!(matches!(s.trigger_mode, TriggerMode::PushToTalk));
-        assert_eq!(s.shortcut, "rightoption");
+        assert_eq!(s.bindings.len(), 1);
+        assert_eq!(s.bindings[0].combo, "rightoption");
+        assert!(matches!(s.bindings[0].action, ActionKind::StartRecord));
         assert_eq!(s.stt.model, "whisper-large-v3");
         assert_eq!(s.llm.model, "gpt-4o-mini");
         assert!(!s.separate_api_keys);
@@ -137,6 +186,58 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, parsed);
+    }
+
+    #[test]
+    fn legacy_shortcut_trigger_migrates_to_bindings() {
+        let json = r#"{
+            "language": "ja",
+            "shortcut": "rightoption",
+            "trigger_mode": "push_to_talk",
+            "translate_mode": false,
+            "llm_correct": false
+        }"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.migrate_legacy();
+        assert_eq!(s.bindings.len(), 1);
+        assert_eq!(s.bindings[0].combo, "rightoption");
+        assert!(matches!(s.bindings[0].action, ActionKind::StartRecord));
+        assert!(s.shortcut.is_none());
+        assert!(s.trigger_mode.is_none());
+    }
+
+    #[test]
+    fn legacy_toggle_migrates_to_hands_free() {
+        let json = r#"{
+            "language": "ja",
+            "shortcut": "f5",
+            "trigger_mode": "toggle",
+            "translate_mode": false,
+            "llm_correct": false
+        }"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.migrate_legacy();
+        assert_eq!(s.bindings.len(), 1);
+        assert_eq!(s.bindings[0].combo, "f5");
+        assert!(matches!(s.bindings[0].action, ActionKind::HandsFree));
+    }
+
+    #[test]
+    fn existing_bindings_not_overwritten_by_migration() {
+        let json = r#"{
+            "language": "ja",
+            "shortcut": "f5",
+            "trigger_mode": "toggle",
+            "translate_mode": false,
+            "llm_correct": false,
+            "bindings": [
+                {"id": "b1", "action": "start_record", "combo": "rightoption", "enabled": true}
+            ]
+        }"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.migrate_legacy();
+        assert_eq!(s.bindings.len(), 1);
+        assert_eq!(s.bindings[0].id, "b1");
     }
 
     #[test]
@@ -172,16 +273,19 @@ mod tests {
         s.migrate_legacy();
         let saved = serde_json::to_string(&s).unwrap();
         assert!(!saved.contains("api_base"), "api_base must not be written after migration");
-        assert!(saved.contains("stt"), "stt block must be present");
-        assert!(saved.contains("llm"), "llm block must be present");
+        assert!(!saved.contains("\"shortcut\""), "shortcut must not be written after migration");
+        assert!(!saved.contains("trigger_mode"), "trigger_mode must not be written after migration");
+        assert!(saved.contains("bindings"), "bindings block must be present");
     }
 
     #[test]
     fn new_format_json_loads_without_migration() {
         let json = r#"{
             "language": "en",
-            "shortcut": "f5",
-            "trigger_mode": "toggle",
+            "bindings": [
+                {"id": "b1", "action": "start_record", "combo": "leftoption", "enabled": true},
+                {"id": "b2", "action": "cancel", "combo": "escape", "enabled": true}
+            ],
             "translate_mode": true,
             "llm_correct": true,
             "stt": {"base_url": "https://api.openai.com", "model": "whisper-1", "auth_kind": {"kind": "bearer"}},
@@ -190,9 +294,9 @@ mod tests {
         }"#;
         let mut s: Settings = serde_json::from_str(json).unwrap();
         s.migrate_legacy();
-        assert_eq!(s.stt.base_url, "https://api.openai.com");
-        assert_eq!(s.stt.model, "whisper-1");
-        assert_eq!(s.llm.model, "gpt-4");
+        assert_eq!(s.bindings.len(), 2);
+        assert_eq!(s.bindings[0].id, "b1");
+        assert_eq!(s.bindings[1].action, ActionKind::Cancel);
         assert!(s.separate_api_keys);
     }
 }

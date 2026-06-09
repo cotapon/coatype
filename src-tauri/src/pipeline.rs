@@ -6,6 +6,11 @@ use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryStore;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::task::JoinHandle;
+
+pub struct CurrentTask {
+    pub join: JoinHandle<()>,
+}
 
 pub struct Pipeline {
     pub recorder: Mutex<Recorder>,
@@ -18,6 +23,7 @@ pub struct Pipeline {
     pub language: Arc<Mutex<String>>,
     pub llm_correct: Arc<Mutex<bool>>,
     started_at: Mutex<Option<Instant>>,
+    pub current_task: Mutex<Option<CurrentTask>>,
 }
 
 impl Pipeline {
@@ -40,6 +46,7 @@ impl Pipeline {
             language: Arc::new(Mutex::new(language)),
             llm_correct: Arc::new(Mutex::new(llm_correct)),
             started_at: Mutex::new(None),
+            current_task: Mutex::new(None),
         }
     }
 
@@ -62,7 +69,7 @@ impl Pipeline {
         }
     }
 
-    // ── クライアント再構築 (base_url / model / auth_kind 変更時) ─
+    // ── クライアント再構築 ───────────────────────────────────────
 
     pub fn rebuild_stt_client(&self, config: &ProviderConfig, api_key: String) {
         let new_client = Arc::new(WhisperClient::new(
@@ -112,7 +119,6 @@ impl Pipeline {
         let translate = *self.translate.lock().unwrap();
         let language = self.language.lock().unwrap().clone();
 
-        // Arc<WhisperClient> をクローンしてロックを解放してから await
         let client = self.client.lock().unwrap().clone();
         let raw = if translate {
             client.translate(&wav).await?
@@ -120,12 +126,9 @@ impl Pipeline {
             client.transcribe(&wav, &language, None).await?
         };
 
-        // 高速パス: 完全一致置換 (常時)
         let after_dict = self.dict.lock().unwrap().apply(&raw);
 
-        // LLM 補正パス (設定 ON かつ llm クライアントあり)
         let final_text = if *self.llm_correct.lock().unwrap() {
-            // Arc<LlmCorrectClient> をクローンしてロックを解放してから await
             let llm_opt = self.llm.lock().unwrap().clone();
             if let Some(llm) = llm_opt {
                 let entries: Vec<(String, String)> = self
@@ -136,9 +139,7 @@ impl Pipeline {
                     .iter()
                     .map(|e| (e.from.clone(), e.to.clone()))
                     .collect();
-                llm.correct(&after_dict, &entries)
-                    .await
-                    .unwrap_or(after_dict)
+                llm.correct(&after_dict, &entries).await.unwrap_or(after_dict)
             } else {
                 after_dict
             }
@@ -146,9 +147,25 @@ impl Pipeline {
             after_dict
         };
 
-        self.history
-            .insert(&final_text, &language, translate, elapsed)?;
+        self.history.insert(&final_text, &language, translate, elapsed)?;
         Ok(final_text)
+    }
+
+    /// 録音を破棄し、処理中タスクを強制終了する。
+    pub fn cancel(&self) {
+        self.recorder.lock().unwrap().stop();
+        *self.started_at.lock().unwrap() = None;
+        if let Some(task) = self.current_task.lock().unwrap().take() {
+            task.join.abort();
+        }
+    }
+
+    /// 最後の文字起こし結果を返す。履歴が空なら None。
+    pub fn last_transcription(&self) -> Option<String> {
+        self.history
+            .list(1)
+            .ok()
+            .and_then(|items| items.into_iter().next().map(|i| i.text))
     }
 }
 

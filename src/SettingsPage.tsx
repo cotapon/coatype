@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { Settings, Dictionary, HistoryItem, ActiveShortcut, AuthKind } from "./types";
+import type { Settings, Dictionary, HistoryItem, ActiveShortcut, AuthKind, KeyBinding, ActionKind } from "./types";
+import { ACTION_LABELS, CODE_TO_COMBO, comboToLabel, detectImeConflict } from "./types";
 import {
   getSettings, saveSettings,
   getDictionary, saveDictionary,
@@ -8,6 +9,7 @@ import {
   saveApiKey, hasApiKey,
   checkAccessibility, openAccessibilitySettings,
   activeShortcut,
+  setListenerPaused,
 } from "./invoke";
 import "./settings.css";
 
@@ -47,7 +49,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     getSettings()
-      .then((s) => setSettings({ ...s, shortcut: s.shortcut.toLowerCase() }))
+      .then(setSettings)
       .catch(console.error);
     getDictionary().then(setDict).catch(console.error);
     refreshKeyStatus();
@@ -181,17 +183,6 @@ export function SettingsPage() {
 
 // --------------- General ---------------
 
-const SHORTCUT_OPTIONS = [
-  { value: "rightoption",  label: "Right Option ⌥" },
-  { value: "leftoption",   label: "Left Option ⌥L" },
-  { value: "rightcontrol", label: "Right Control ⌃R" },
-  { value: "leftcontrol",  label: "Left Control ⌃L" },
-  { value: "f5", label: "F5" },
-  { value: "f6", label: "F6" },
-  { value: "f7", label: "F7" },
-  { value: "f8", label: "F8" },
-];
-
 function GeneralPane({
   settings, onChange, onSave, accessibilityOk, onRefreshAccessibility, listenerState,
 }: {
@@ -241,44 +232,20 @@ function GeneralPane({
       </div>
 
       <div className="divider" />
-      <div className="section-header">ショートカット</div>
+      <div className="section-header">キーバインド</div>
 
-      <div className="field-row">
-        <span className="field-label">トリガーキー</span>
-        <div className="field-control">
-          <select
-            value={settings.shortcut}
-            onChange={(e) => set({ shortcut: e.target.value })}
-          >
-            {SHORTCUT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          {listenerState && (
-            <div className={`listener-badge listener-badge-${listenerState.status}`}>
-              {listenerState.status === "starting" && "⏳ 起動中..."}
-              {listenerState.status === "ok" && `✓ 有効: ${listenerState.shortcut}`}
-              {listenerState.status === "parse_error" && `❌ ${listenerState.error}`}
-              {listenerState.status === "tap_failed" && `❌ ${listenerState.error}`}
-            </div>
-          )}
+      {listenerState && (
+        <div className={`listener-badge listener-badge-${listenerState.status}`} style={{ alignSelf: "flex-start" }}>
+          {listenerState.status === "starting" && "⏳ 起動中..."}
+          {listenerState.status === "ok" && "✓ リスナー有効"}
+          {listenerState.status === "tap_failed" && `❌ ${listenerState.error}`}
         </div>
-      </div>
+      )}
 
-      <div className="field-row">
-        <span className="field-label">入力モード</span>
-        <div className="field-control">
-          <select
-            value={settings.trigger_mode}
-            onChange={(e) =>
-              set({ trigger_mode: e.target.value as Settings["trigger_mode"] })
-            }
-          >
-            <option value="push_to_talk">長押し (Push-to-Talk)</option>
-            <option value="toggle">トグル</option>
-          </select>
-        </div>
-      </div>
+      <KeybindingsSection
+        bindings={settings.bindings}
+        onChange={(bindings) => set({ bindings })}
+      />
 
       <div className="divider" />
       <div className="section-header">オプション</div>
@@ -311,6 +278,211 @@ function GeneralPane({
 
       <div className="action-bar">
         <button className="btn-primary" onClick={onSave}>保存</button>
+      </div>
+    </div>
+  );
+}
+
+// --------------- KeybindingsSection ---------------
+
+const ACTION_ORDER: ActionKind[] = ["start_record", "hands_free", "cancel", "paste_last"];
+
+function KeybindingsSection({
+  bindings, onChange,
+}: {
+  bindings: KeyBinding[];
+  onChange: (b: KeyBinding[]) => void;
+}) {
+  const [captureFor, setCaptureFor] = useState<{ action: ActionKind; editId?: string } | null>(null);
+
+  const byAction = (action: ActionKind) => bindings.filter((b) => b.action === action);
+
+  const addBinding = (action: ActionKind, combo: string) => {
+    const newBinding: KeyBinding = {
+      id: crypto.randomUUID(),
+      action,
+      combo,
+      enabled: true,
+    };
+    onChange([...bindings, newBinding]);
+  };
+
+  const updateBinding = (id: string, combo: string) => {
+    onChange(bindings.map((b) => (b.id === id ? { ...b, combo } : b)));
+  };
+
+  const toggleBinding = (id: string) => {
+    onChange(bindings.map((b) => (b.id === id ? { ...b, enabled: !b.enabled } : b)));
+  };
+
+  const removeBinding = (id: string) => {
+    onChange(bindings.filter((b) => b.id !== id));
+  };
+
+  const handleCaptureConfirm = (combo: string) => {
+    if (!captureFor) return;
+    if (captureFor.editId) {
+      updateBinding(captureFor.editId, combo);
+    } else {
+      addBinding(captureFor.action, combo);
+    }
+    setCaptureFor(null);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+      {ACTION_ORDER.map((action) => (
+        <div key={action} className="keybinding-action-group">
+          <div className="keybinding-action-header">
+            <span className="keybinding-action-label">{ACTION_LABELS[action]}</span>
+          </div>
+          {byAction(action).map((binding) => (
+            <div key={binding.id} className="keybinding-row">
+              <button
+                className={`keybinding-toggle ${binding.enabled ? "enabled" : "disabled"}`}
+                onClick={() => toggleBinding(binding.id)}
+                title={binding.enabled ? "無効にする" : "有効にする"}
+              >
+                {binding.enabled ? "●" : "○"}
+              </button>
+              <div className={`keybinding-chip${!binding.enabled ? " keybinding-chip-disabled" : ""}`}>
+                {comboToLabel(binding.combo)}
+              </div>
+              {detectImeConflict(binding.combo) && (
+                <span className="keybinding-ime-warn" title="IMEと衝突する可能性があります">⚠</span>
+              )}
+              <div className="keybinding-row-actions">
+                <button
+                  className="btn-icon-sm"
+                  onClick={() => setCaptureFor({ action, editId: binding.id })}
+                  title="編集"
+                >
+                  ✏
+                </button>
+                <button
+                  className="btn-icon-sm btn-icon-danger"
+                  onClick={() => removeBinding(binding.id)}
+                  title="削除"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+          <button className="keybinding-add-btn" onClick={() => setCaptureFor({ action })}>
+            + キーバインドを追加
+          </button>
+        </div>
+      ))}
+
+      {captureFor && (
+        <CaptureModal
+          action={ACTION_LABELS[captureFor.action]}
+          initialCombo={captureFor.editId ? bindings.find((b) => b.id === captureFor.editId)?.combo : undefined}
+          onConfirm={handleCaptureConfirm}
+          onClose={() => setCaptureFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// --------------- CaptureModal ---------------
+
+function CaptureModal({
+  action, initialCombo, onConfirm, onClose,
+}: {
+  action: string;
+  initialCombo?: string;
+  onConfirm: (combo: string) => void;
+  onClose: () => void;
+}) {
+  const [capturedCombo, setCapturedCombo] = useState<string>(initialCombo ?? "");
+  const [displayKeys, setDisplayKeys] = useState<string[]>(
+    initialCombo ? initialCombo.split("+") : [],
+  );
+  const [isCapturing, setIsCapturing] = useState(!initialCombo);
+  const heldCodesRef = useRef<string[]>([]);
+
+  // モーダルが開いている間はグローバルリスナーを停止して録音を防ぐ
+  useEffect(() => {
+    setListenerPaused(true).catch(console.error);
+    return () => { setListenerPaused(false).catch(console.error); };
+  }, []);
+
+  useEffect(() => {
+    if (!isCapturing) return;
+    heldCodesRef.current = [];
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      const key = CODE_TO_COMBO[e.code];
+      if (!key) return;
+      if (!heldCodesRef.current.includes(key)) {
+        heldCodesRef.current = [...heldCodesRef.current, key];
+        setDisplayKeys([...heldCodesRef.current]);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      const released = CODE_TO_COMBO[e.code];
+      if (!released || !heldCodesRef.current.includes(released)) return;
+      // 解放されたキーをトリガーキーとし、残りをモディファイアに
+      const modifiers = heldCodesRef.current.filter((k) => k !== released);
+      const combo = [...modifiers, released].join("+");
+      setCapturedCombo(combo);
+      setDisplayKeys([...modifiers, released]);
+      setIsCapturing(false);
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("keyup", handleKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("keyup", handleKeyUp, true);
+    };
+  }, [isCapturing]);
+
+  const displayText = isCapturing
+    ? (displayKeys.length > 0 ? comboToLabel(displayKeys.join("+")) : "キーを押してください...")
+    : (capturedCombo ? comboToLabel(capturedCombo) : "");
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-dialog">
+        <div className="modal-title">使用したいキーの組み合わせを押してください</div>
+        <div className="modal-subtitle">このショートカットで「{action}」が実行されます。</div>
+
+        <div
+          className={`capture-box ${isCapturing ? "capturing" : "captured"}`}
+          onClick={() => {
+            setIsCapturing(true);
+            setDisplayKeys([]);
+            heldCodesRef.current = [];
+          }}
+        >
+          {displayText}
+        </div>
+
+        {!isCapturing && capturedCombo && detectImeConflict(capturedCombo) && (
+          <div className="capture-warning">
+            ⚠ このキー組み合わせは日本語IMEと衝突する可能性があります
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button className="btn-secondary" onClick={onClose}>
+            キャンセル
+          </button>
+          <button
+            className="btn-primary"
+            onClick={() => capturedCombo && onConfirm(capturedCombo)}
+            disabled={!capturedCombo || isCapturing}
+          >
+            保存
+          </button>
+        </div>
       </div>
     </div>
   );

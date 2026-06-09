@@ -22,3 +22,5 @@ export const checkAccessibility = () => invoke<boolean>("check_accessibility");
 export const openAccessibilitySettings = () =>
   invoke<void>("open_accessibility_settings");
 export const activeShortcut = () => invoke<ActiveShortcut>("active_shortcut");
+export const setListenerPaused = (paused: boolean) =>
+  invoke<void>("set_listener_paused", { paused });
