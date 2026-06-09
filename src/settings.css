@@ -337,6 +337,23 @@ body {
   border: 1px solid #e5e5ea;
   border-radius: 9px;
   padding: 9px 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.history-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-copy-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.history-copy-btn--copied {
+  color: #34c759;
 }
 
 .history-text {
