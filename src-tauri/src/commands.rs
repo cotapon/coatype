@@ -19,6 +19,7 @@ pub struct ActiveShortcut {
 pub struct ListenerState(pub Arc<Mutex<ActiveShortcut>>);
 pub struct ListenerBindings(pub Arc<Mutex<Vec<RegisteredBinding>>>);
 pub struct ListenerPaused(pub Arc<AtomicBool>);
+pub struct ShowOverlay(pub Arc<AtomicBool>);
 
 pub struct SettingsPath(pub PathBuf);
 pub struct DictPath(pub PathBuf);
@@ -34,6 +35,7 @@ pub async fn save_settings(
     path: State<'_, SettingsPath>,
     pipeline: State<'_, Arc<Pipeline>>,
     bindings_state: State<'_, ListenerBindings>,
+    show_overlay_state: State<'_, ShowOverlay>,
 ) -> Result<(), String> {
     settings.save(&path.0).map_err(|e| e.to_string())?;
     let p: &Pipeline = &**pipeline;
@@ -55,6 +57,8 @@ pub async fn save_settings(
     // キーバインドをホットリロード (リスナー再起動なし)
     let new_registered = bindings_to_registered(&settings.bindings);
     *bindings_state.0.lock().unwrap() = new_registered;
+
+    show_overlay_state.0.store(settings.show_overlay, Ordering::Relaxed);
 
     Ok(())
 }
