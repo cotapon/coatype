@@ -54,6 +54,8 @@ pub struct Settings {
     pub llm: ProviderConfig,
     #[serde(default)]
     pub separate_api_keys: bool,
+    #[serde(default = "default_true")]
+    pub show_overlay: bool,
     // 旧 api_base フィールドの読み取り専用エイリアス
     #[serde(default, rename = "api_base", skip_serializing_if = "Option::is_none")]
     pub legacy_api_base: Option<String>,
@@ -62,6 +64,10 @@ pub struct Settings {
     pub shortcut: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger_mode: Option<TriggerMode>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -89,6 +95,7 @@ impl Default for Settings {
                 auth_kind: AuthKind::Bearer,
             },
             separate_api_keys: false,
+            show_overlay: true,
             legacy_api_base: None,
             shortcut: None,
             trigger_mode: None,
@@ -298,5 +305,29 @@ mod tests {
         assert_eq!(s.bindings[0].id, "b1");
         assert_eq!(s.bindings[1].action, ActionKind::Cancel);
         assert!(s.separate_api_keys);
+    }
+
+    #[test]
+    fn show_overlay_defaults_to_true_when_missing() {
+        let json = r#"{
+            "language": "ja",
+            "bindings": [],
+            "translate_mode": false,
+            "llm_correct": false,
+            "stt": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}},
+            "llm": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}},
+            "separate_api_keys": false
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(s.show_overlay, "show_overlay が JSON にない場合は true がデフォルト");
+    }
+
+    #[test]
+    fn show_overlay_false_roundtrip() {
+        let mut s = Settings::default();
+        s.show_overlay = false;
+        let json = serde_json::to_string(&s).unwrap();
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert!(!parsed.show_overlay);
     }
 }
