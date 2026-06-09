@@ -236,7 +236,9 @@ fn show_overlay_panel(handle: &tauri::AppHandle) {
     let _ = handle.run_on_main_thread(move || {
         if let Some(w) = h.get_webview_window("overlay") {
             // 画面下部中央に位置を設定 (物理ピクセル)
-            if let Ok(Some(monitor)) = w.current_monitor() {
+            let monitor_opt = w.current_monitor().ok().flatten()
+                .or_else(|| h.primary_monitor().ok().flatten());
+            if let Some(monitor) = monitor_opt {
                 let scale = monitor.scale_factor();
                 let screen_size = monitor.size();
                 let screen_pos = monitor.position();
