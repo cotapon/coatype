@@ -231,17 +231,60 @@ fn main() {
         .expect("error while running CoAType");
 }
 
+/// カーソル座標を含むモニターを返す。
+/// Tauri の monitor_from_point は macOS で座標系がズレてバグるため、
+/// available_monitors() で自前ヒットテストし、
+/// どのモニターにも入らない場合は最近傍モニターを返す。
+fn find_monitor_for_cursor(handle: &tauri::AppHandle) -> Option<tauri::Monitor> {
+    let cursor = handle.cursor_position().ok()?;
+    let monitors = handle.available_monitors().ok().unwrap_or_default();
+    if monitors.is_empty() {
+        return None;
+    }
+    if let Some(m) = monitors.iter().find(|m| {
+        let p = m.position();
+        let s = m.size();
+        cursor.x >= p.x as f64
+            && cursor.x < (p.x as f64 + s.width as f64)
+            && cursor.y >= p.y as f64
+            && cursor.y < (p.y as f64 + s.height as f64)
+    }) {
+        return Some(m.clone());
+    }
+    // 座標系ズレで内包判定が失敗した場合は最近傍モニターを選ぶ
+    monitors.into_iter().min_by(|a, b| {
+        let da = cursor_dist_sq(cursor.x, cursor.y, a);
+        let db = cursor_dist_sq(cursor.x, cursor.y, b);
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+fn cursor_dist_sq(cx: f64, cy: f64, m: &tauri::Monitor) -> f64 {
+    let p = m.position();
+    let s = m.size();
+    let left = p.x as f64;
+    let top = p.y as f64;
+    let right = left + s.width as f64;
+    let bottom = top + s.height as f64;
+    let dx = if cx < left { left - cx } else if cx >= right { cx - right } else { 0.0 };
+    let dy = if cy < top { top - cy } else if cy >= bottom { cy - bottom } else { 0.0 };
+    dx * dx + dy * dy
+}
+
 fn show_overlay_panel(handle: &tauri::AppHandle) {
     let h = handle.clone();
     let _ = handle.run_on_main_thread(move || {
         if let Some(w) = h.get_webview_window("overlay") {
-            // 画面下部中央に位置を設定 (物理ピクセル)
-            let monitor_opt = w.current_monitor().ok().flatten()
+            // カーソル位置のモニター → 現在ウィンドウのモニター → プライマリ の順でフォールバック
+            let monitor_opt = find_monitor_for_cursor(&h)
+                .or_else(|| w.current_monitor().ok().flatten())
                 .or_else(|| h.primary_monitor().ok().flatten());
             if let Some(monitor) = monitor_opt {
                 let scale = monitor.scale_factor();
-                let screen_size = monitor.size();
-                let screen_pos = monitor.position();
+                // Dock/メニューバー/タスクバーを除いた領域を基準に配置
+                let area = monitor.work_area();
+                let screen_size = area.size;
+                let screen_pos = area.position;
                 let overlay_w = (220.0 * scale) as i32;
                 let overlay_h = (60.0 * scale) as i32;
                 let margin = (40.0 * scale) as i32;
