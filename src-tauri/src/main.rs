@@ -106,7 +106,7 @@ fn main() {
                 MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_item, &quit])?;
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tauri::include_image!("icons/tray-icon.png"))
                 .menu(&menu)
                 .on_menu_event(|app, ev| match ev.id.as_ref() {
                     "quit" => app.exit(0),
