@@ -121,7 +121,18 @@ impl Pipeline {
             tracing::debug!("wav too short, skipping");
             return Ok(String::new());
         }
-        if wav_is_silent(&wav) {
+        let (rms, peak) = wav_stats(&wav);
+        tracing::info!(
+            "recording: rms={:.1}, peak={} (skip if rms<{} & peak<{})",
+            rms,
+            peak,
+            SILENCE_THRESHOLD_RMS,
+            SILENCE_THRESHOLD_PEAK
+        );
+        // 無音スキップは RMS とピーク振幅の両方が低いときだけ行う。
+        // 低ゲインのマイクで音量が小さい実発話を、RMS だけで弾いてしまうのを防ぐ。
+        // 発話があれば子音・破裂音などでピークが立つため、ピークが閾値を超えていれば通す。
+        if rms < SILENCE_THRESHOLD_RMS && (peak as f64) < SILENCE_THRESHOLD_PEAK {
             tracing::info!("silent audio, skipping transcription");
             return Ok(String::new());
         }
@@ -177,7 +188,7 @@ impl Pipeline {
     /// 履歴への保存・LLM 補正・テキスト挿入は行わず、辞書置換のみ適用して結果を返す。
     /// 設定画面の「録音テスト」ボタンから呼ばれる。
     ///
-    /// 本番の `stop_and_process` と違い、無音スキップ (`wav_is_silent`) は行わない。
+    /// 本番の `stop_and_process` と違い、無音スキップは行わない。
     /// テストはユーザーが明示的に開始するものなので、捕捉した音声はそのまま STT に送る。
     /// マイクからサンプルを 1 件も取得できなかった場合のみエラーを返す
     /// (マイク権限やデバイス選択の問題を切り分けやすくするため)。
@@ -231,25 +242,32 @@ impl Pipeline {
     }
 }
 
-/// WAV の i16 サンプルから RMS を計算し、閾値以下なら true を返す。
-/// Whisper は無音・環境音のみの音声に対して「ありがとうございます」などを幻覚するため、
-/// 送信前にここで弾く。閾値は i16::MAX (32767) の約 1% = 300。
-fn wav_is_silent(wav: &[u8]) -> bool {
-    const WAV_HEADER: usize = 44;
-    const SILENCE_THRESHOLD_RMS: f64 = 300.0;
+const WAV_HEADER: usize = 44;
+/// 無音判定の RMS 閾値。i16::MAX (32767) の約 1%。
+const SILENCE_THRESHOLD_RMS: f64 = 300.0;
+/// 無音判定のピーク振幅閾値。実発話なら子音・破裂音でこの値を超える。
+/// RMS が低くてもピークがこれを超えていれば「無音ではない」と判断する。
+const SILENCE_THRESHOLD_PEAK: f64 = 1200.0;
 
-    let sample_bytes = &wav[WAV_HEADER..];
+/// WAV の i16 サンプルから RMS とピーク絶対値を計算する。
+/// Whisper は無音・環境音のみの音声に対して「ありがとうございます」などを幻覚するため、
+/// 送信前にこの統計値で無音を弾く。
+fn wav_stats(wav: &[u8]) -> (f64, i32) {
+    let header = WAV_HEADER.min(wav.len());
+    let sample_bytes = &wav[header..];
     if sample_bytes.len() < 2 {
-        return true;
+        return (0.0, 0);
     }
-    let sum_sq: f64 = sample_bytes
-        .chunks_exact(2)
-        .map(|c| {
-            let s = i16::from_le_bytes([c[0], c[1]]) as f64;
-            s * s
-        })
-        .sum();
+    let mut sum_sq = 0.0_f64;
+    let mut peak = 0_i32;
+    for c in sample_bytes.chunks_exact(2) {
+        let s = i16::from_le_bytes([c[0], c[1]]) as i32;
+        sum_sq += (s as f64) * (s as f64);
+        let a = s.abs();
+        if a > peak {
+            peak = a;
+        }
+    }
     let count = (sample_bytes.len() / 2) as f64;
-    let rms = (sum_sq / count).sqrt();
-    rms < SILENCE_THRESHOLD_RMS
+    ((sum_sq / count).sqrt(), peak)
 }

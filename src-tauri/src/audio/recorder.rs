@@ -30,6 +30,13 @@ impl Recorder {
             .ok_or_else(|| anyhow::anyhow!("no input device"))?;
         let config = device.default_input_config()?;
         self.sample_rate = config.sample_rate().0;
+        tracing::info!(
+            "recorder: device={:?}, format={:?}, channels={}, sample_rate={}",
+            device.name().unwrap_or_else(|_| "?".into()),
+            config.sample_format(),
+            config.channels(),
+            config.sample_rate().0,
+        );
 
         let samples = Arc::clone(&self.samples);
         samples.lock().unwrap().clear();
