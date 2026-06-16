@@ -261,6 +261,7 @@ export function SettingsPage() {
   const [accessibilityOk, setAccessibilityOk] = useState(true);
   const [listenerState, setListenerState] = useState<ActiveShortcut | null>(null);
   const [banner, setBanner] = useState<{ type: "saved" | "error"; text: string } | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const settingsLoaded = useRef(false);
   const dictLoaded = useRef(false);
@@ -354,6 +355,7 @@ export function SettingsPage() {
 
   const handleReset = () => {
     if (initialSettings) setSettings(initialSettings);
+    setShowResetConfirm(false);
   };
 
   const handleDone = () => {
@@ -472,7 +474,7 @@ export function SettingsPage() {
           すべての変更は自動的に保存されます
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onPress={handleReset}>
+          <Button variant="outline" onPress={() => setShowResetConfirm(true)}>
             リセット
           </Button>
           <Button variant="primary" onPress={handleDone}>
@@ -480,6 +482,33 @@ export function SettingsPage() {
           </Button>
         </div>
       </footer>
+
+      {showResetConfirm && (
+        <Modal.Backdrop
+          variant="blur"
+          isOpen
+          onOpenChange={(open) => { if (!open) setShowResetConfirm(false); }}
+        >
+          <Modal.Container>
+            <Modal.Dialog className="sm:max-w-[400px]">
+              <Modal.Header>
+                <Modal.Heading>設定をリセットしますか？</Modal.Heading>
+                <p className="mt-1.5 text-sm text-muted">
+                  この画面を開いた時点の設定に戻します。今回行った変更は破棄されます。
+                </p>
+              </Modal.Header>
+              <Modal.Footer>
+                <Button variant="secondary" onPress={() => setShowResetConfirm(false)}>
+                  キャンセル
+                </Button>
+                <Button variant="danger" onPress={handleReset}>
+                  リセット
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      )}
     </div>
   );
 }
