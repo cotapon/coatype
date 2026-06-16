@@ -133,15 +133,6 @@ const IconX = ({ className }: { className?: string }) => (
     <line x1="18" y1="6" x2="6" y2="18" />
   </Svg>
 );
-const IconClipboard = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <rect x="6" y="4.5" width="12" height="16" rx="2" />
-    <path d="M9 4.5V3.5h6v1" />
-    <line x1="9" y1="9.5" x2="15" y2="9.5" />
-    <line x1="9" y1="13" x2="15" y2="13" />
-    <line x1="9" y1="16.5" x2="13" y2="16.5" />
-  </Svg>
-);
 const IconWaveform = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <line x1="5" y1="10" x2="5" y2="14" />
@@ -796,20 +787,18 @@ function SummaryItem({
 
 // --------------- KeybindingsSection ---------------
 
-const ACTION_ORDER: ActionKind[] = ["start_record", "hands_free", "cancel", "paste_last"];
+const ACTION_ORDER: ActionKind[] = ["start_record", "hands_free", "cancel"];
 
 const ACTION_ICONS: Record<ActionKind, React.ComponentType<{ className?: string }>> = {
   start_record: IconMic,
   hands_free: IconHand,
   cancel: IconX,
-  paste_last: IconClipboard,
 };
 
 const ACTION_ROW_LABELS: Record<ActionKind, string> = {
   start_record: "録音開始",
   hands_free: "ハンズフリー開始",
   cancel: "キャンセル",
-  paste_last: "最後の文字起こしを貼り付け",
 };
 
 type CaptureState =
@@ -854,7 +843,6 @@ function KeybindingsSection({
           {ACTION_ORDER.map((action) => {
             const rows = byAction(action);
             const Icon = ACTION_ICONS[action];
-            const isPrimary = action === "start_record";
 
             if (rows.length === 0) {
               return (
@@ -880,7 +868,7 @@ function KeybindingsSection({
               <div key={binding.id} className="flex items-center gap-3 px-4 py-3">
                 <div
                   className={`flex size-9 shrink-0 items-center justify-center rounded-full ${
-                    isPrimary ? "bg-accent text-accent-foreground" : "bg-surface-secondary text-muted"
+                    binding.enabled ? "bg-accent text-accent-foreground" : "bg-surface-secondary text-muted"
                   }`}
                 >
                   <Icon className="size-[18px]" />
@@ -899,17 +887,18 @@ function KeybindingsSection({
                       <IconWarning className="size-4" />
                     </span>
                   )}
-                  <button
-                    onClick={() => toggleBinding(binding.id)}
-                    title="クリックで有効 / 無効を切り替え"
-                    className={`rounded-md px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80 ${
-                      binding.enabled
-                        ? "bg-success-soft text-success"
-                        : "bg-surface-secondary text-muted"
-                    }`}
+                  <Switch
+                    isSelected={binding.enabled}
+                    onChange={() => toggleBinding(binding.id)}
+                    aria-label="有効・無効を切り替え"
+                    size="sm"
                   >
-                    {binding.enabled ? "有効" : "無効"}
-                  </button>
+                    <Switch.Content>
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                    </Switch.Content>
+                  </Switch>
                   <div className="ml-1 flex items-center gap-1.5">
                     <Button
                       isIconOnly
@@ -1029,6 +1018,7 @@ function CaptureModal({
     <Modal.Backdrop
       variant="blur"
       isOpen
+      isKeyboardDismissDisabled={isCapturing}
       onOpenChange={(open) => { if (!open) onClose(); }}
     >
       <Modal.Container>

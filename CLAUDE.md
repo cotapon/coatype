@@ -73,6 +73,7 @@ CGEventTapCreate(
 - `src/macos/common.rs`: `CGEventTapOption::Default` の feature gate を除去
 - `src/macos/grab.rs`: `CGEventTapLocation::Session` に変更
 - `src/lib.rs`: `grab` のコールバック型を `Fn` → `FnMut` に変更 (クロージャ内でミュータブル状態を持てるように)
+- `src/macos/keycodes.rs`: `key_from_code` に `CONTROL_RIGHT => Key::ControlRight` を追加 (欠落によりRightCtrlが `Key::Unknown(62)` になりバインド一致しなかった)
 
 ### keyring の apple-native feature
 

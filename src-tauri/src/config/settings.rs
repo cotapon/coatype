@@ -15,7 +15,8 @@ pub enum ActionKind {
     StartRecord,
     HandsFree,
     Cancel,
-    PasteLast,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,6 +157,9 @@ impl Settings {
         if self.llm.model.is_empty() {
             self.llm.model = "gpt-4o-mini".into();
         }
+
+        // 削除されたアクション (paste_last 等) を持つバインドを除去
+        self.bindings.retain(|b| b.action != ActionKind::Unknown);
 
         // 旧 shortcut/trigger_mode を bindings に変換
         if self.bindings.is_empty() {

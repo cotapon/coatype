@@ -9,7 +9,7 @@ export interface ProviderConfig {
   auth_kind: AuthKind;
 }
 
-export type ActionKind = "start_record" | "hands_free" | "cancel" | "paste_last";
+export type ActionKind = "start_record" | "hands_free" | "cancel";
 
 export interface KeyBinding {
   id: string;
@@ -56,7 +56,6 @@ export const ACTION_LABELS: Record<ActionKind, string> = {
   start_record: "録音",
   hands_free: "ハンズフリー",
   cancel: "キャンセル",
-  paste_last: "最後の文字起こしを貼り付け",
 };
 
 /** KeyboardEvent.code → rdev 互換文字列への変換テーブル */

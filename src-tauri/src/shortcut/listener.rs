@@ -18,7 +18,6 @@ pub enum ShortcutEvent {
     StartRecording { binding_id: String, mode: RecordMode },
     StopRecording { binding_id: String },
     Cancel,
-    PasteLast,
 }
 
 #[derive(Debug, Clone)]
@@ -96,22 +95,20 @@ pub fn start(
                                 }
                             }
                             ActionKind::HandsFree => {
-                                // トグルロジックは main.rs 側で管理 (is_recording_main)
-                                let _ = tx.send(ShortcutEvent::StartRecording {
-                                    binding_id: binding.id.clone(),
-                                    mode: RecordMode::HandsFree,
-                                });
+                                if !already_held {
+                                    tracing::info!("shortcut: hands_free key detected ({:?})", k);
+                                    let _ = tx.send(ShortcutEvent::StartRecording {
+                                        binding_id: binding.id.clone(),
+                                        mode: RecordMode::HandsFree,
+                                    });
+                                }
                             }
                             ActionKind::Cancel => {
                                 if !already_held {
                                     let _ = tx.send(ShortcutEvent::Cancel);
                                 }
                             }
-                            ActionKind::PasteLast => {
-                                if !already_held {
-                                    let _ = tx.send(ShortcutEvent::PasteLast);
-                                }
-                            }
+                            ActionKind::Unknown => {}
                         }
                     }
                 }

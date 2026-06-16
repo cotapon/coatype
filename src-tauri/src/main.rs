@@ -139,7 +139,8 @@ fn main() {
                 loop {
                     let Some(ev) = rx.recv().await else { break };
                     match ev {
-                        ShortcutEvent::StartRecording { mode, .. } => {
+                        ShortcutEvent::StartRecording { ref mode, .. } => {
+                            tracing::info!("shortcut: StartRecording mode={:?} is_recording={}", mode, is_recording);
                             let should_start = match mode {
                                 RecordMode::PushToTalk => true,
                                 RecordMode::HandsFree => {
@@ -196,15 +197,6 @@ fn main() {
                             let _ = handle.emit("recording-state", "idle");
                             if let Some(w) = handle.get_webview_window("overlay") {
                                 let _ = w.hide();
-                            }
-                        }
-                        ShortcutEvent::PasteLast => {
-                            if let Some(text) = pipeline_clone.last_transcription() {
-                                let _ = handle.run_on_main_thread(move || {
-                                    if let Err(e) = coatype_lib::injector::insert(&text) {
-                                        tracing::error!("paste_last inject error: {e}");
-                                    }
-                                });
                             }
                         }
                     }
