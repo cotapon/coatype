@@ -24,3 +24,6 @@ export const openAccessibilitySettings = () =>
 export const activeShortcut = () => invoke<ActiveShortcut>("active_shortcut");
 export const setListenerPaused = (paused: boolean) =>
   invoke<void>("set_listener_paused", { paused });
+
+export const startTestRecording = () => invoke<void>("start_test_recording");
+export const stopTestRecording = () => invoke<string>("stop_test_recording");

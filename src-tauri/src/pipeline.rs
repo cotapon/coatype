@@ -173,6 +173,46 @@ impl Pipeline {
         Ok(final_text)
     }
 
+    /// 録音テスト用: 録音を停止して文字起こしのみ行う。
+    /// 履歴への保存・LLM 補正・テキスト挿入は行わず、辞書置換のみ適用して結果を返す。
+    /// 設定画面の「録音テスト」ボタンから呼ばれる。
+    ///
+    /// 本番の `stop_and_process` と違い、無音スキップ (`wav_is_silent`) は行わない。
+    /// テストはユーザーが明示的に開始するものなので、捕捉した音声はそのまま STT に送る。
+    /// マイクからサンプルを 1 件も取得できなかった場合のみエラーを返す
+    /// (マイク権限やデバイス選択の問題を切り分けやすくするため)。
+    pub async fn stop_and_transcribe_test(&self) -> anyhow::Result<String> {
+        let wav = {
+            let mut rec = self.recorder.lock().unwrap();
+            rec.stop()
+        };
+        *self.started_at.lock().unwrap() = None;
+
+        let sample_count = wav.len().saturating_sub(44) / 2;
+        tracing::info!(
+            "test recording: stop ({} bytes, ~{} samples)",
+            wav.len(),
+            sample_count
+        );
+
+        if sample_count == 0 {
+            anyhow::bail!(
+                "マイクから音声を取得できませんでした。マイクの権限と入力デバイスを確認してください"
+            );
+        }
+
+        let translate = *self.translate.lock().unwrap();
+        let language = self.language.lock().unwrap().clone();
+        let client = self.client.lock().unwrap().clone();
+        let raw = if translate {
+            client.translate(&wav).await?
+        } else {
+            client.transcribe(&wav, &language, None).await?
+        };
+        tracing::info!("test recording: stt result {:?}", raw);
+        Ok(self.dict.lock().unwrap().apply(&raw))
+    }
+
     /// 録音を破棄し、処理中タスクを強制終了する。
     pub fn cancel(&self) {
         self.recorder.lock().unwrap().stop();

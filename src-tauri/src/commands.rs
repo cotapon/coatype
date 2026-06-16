@@ -144,6 +144,23 @@ pub async fn active_shortcut(
     Ok(listener_state.0.lock().unwrap().clone())
 }
 
+/// 録音テスト開始: マイク録音のみ開始する (グローバルショートカットの録音とは独立)。
+/// 呼び出し側 (フロント) でリスナーを一時停止してから使うこと。
+/// 本番の録音と同じく非同期ランタイム上で `pipeline.start()` を呼ぶ。
+#[tauri::command]
+pub async fn start_test_recording(pipeline: State<'_, Arc<Pipeline>>) -> Result<(), String> {
+    pipeline.start().map_err(|e| e.to_string())
+}
+
+/// 録音テスト停止: 録音を停止して文字起こし結果を返す (履歴・挿入なし)。
+#[tauri::command]
+pub async fn stop_test_recording(pipeline: State<'_, Arc<Pipeline>>) -> Result<String, String> {
+    pipeline
+        .stop_and_transcribe_test()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// キーバインド設定中 (CaptureModal 表示中) はリスナーを一時停止する。
 #[tauri::command]
 pub async fn set_listener_paused(

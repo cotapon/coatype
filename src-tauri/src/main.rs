@@ -226,6 +226,8 @@ fn main() {
             coatype_lib::commands::open_accessibility_settings,
             coatype_lib::commands::active_shortcut,
             coatype_lib::commands::set_listener_paused,
+            coatype_lib::commands::start_test_recording,
+            coatype_lib::commands::stop_test_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CoAType");

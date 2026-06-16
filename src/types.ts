@@ -155,6 +155,36 @@ export function comboToLabel(combo: string): string {
     .join(" + ");
 }
 
+/** コンボ文字列を冗長ラベルに変換 ("rightoption" → "⌥ Right Option")。
+ *  ステータスカードやキーバインドのチップ表示用に、記号 + 英単語で示す。 */
+export function comboToVerboseLabel(combo: string): string {
+  const partLabel: Record<string, string> = {
+    rightoption: "⌥ Right Option",
+    leftoption: "⌥ Left Option",
+    rightcontrol: "⌃ Right Control",
+    leftcontrol: "⌃ Left Control",
+    leftshift: "⇧ Left Shift",
+    rightshift: "⇧ Right Shift",
+    leftmeta: "⌘ Left Command",
+    rightmeta: "⌘ Right Command",
+    space: "Space",
+    escape: "Escape",
+    enter: "Enter",
+    tab: "Tab",
+    home: "Home",
+    end: "End",
+    fn: "Fn",
+  };
+  return combo
+    .split("+")
+    .map((p) => {
+      const t = p.trim().toLowerCase();
+      if (partLabel[t]) return partLabel[t];
+      return t.toUpperCase();
+    })
+    .join(" + ");
+}
+
 /** IME 衝突の可能性があるコンボかどうかを判定 */
 export function detectImeConflict(combo: string): boolean {
   const lower = combo.toLowerCase();

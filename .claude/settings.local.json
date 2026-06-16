@@ -3,5 +3,8 @@
     "allow": [
       "Bash(HTTPS_PROXY=http://127.0.0.1:59808 HTTP_PROXY=http://127.0.0.1:59808 npm create *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "heroui"
+  ]
 }

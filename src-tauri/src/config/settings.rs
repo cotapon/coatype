@@ -70,6 +70,30 @@ fn default_true() -> bool {
     true
 }
 
+/// ロケール文字列から Whisper 用の言語コード(先頭サブタグ)を取り出す。
+/// 例: "ja-JP" -> "ja", "zh-Hans-CN" -> "zh"。空なら None。
+fn language_from_locale(locale: &str) -> Option<String> {
+    let tag = locale
+        .split(['-', '_'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    if tag.is_empty() {
+        None
+    } else {
+        Some(tag)
+    }
+}
+
+/// システムロケールから言語コードを推定する。取得・解析に失敗した場合は "ja"。
+fn detect_system_language() -> String {
+    sys_locale::get_locale()
+        .as_deref()
+        .and_then(language_from_locale)
+        .unwrap_or_else(|| "ja".to_string())
+}
+
 impl Default for Settings {
     fn default() -> Self {
         let base = Self::default_base();
@@ -154,10 +178,18 @@ impl Settings {
     }
 
     pub fn load(path: &PathBuf) -> Self {
-        let mut s: Settings = std::fs::read_to_string(path)
+        let existing: Option<Settings> = std::fs::read_to_string(path)
             .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
+            .and_then(|raw| serde_json::from_str(&raw).ok());
+        let mut s = match existing {
+            Some(s) => s,
+            None => {
+                // 初回起動 (設定ファイルなし): システム言語を初期デフォルトにする
+                let mut d = Settings::default();
+                d.language = detect_system_language();
+                d
+            }
+        };
         s.migrate_legacy();
         s
     }
@@ -174,6 +206,24 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_from_locale_extracts_primary_subtag() {
+        assert_eq!(language_from_locale("ja-JP").as_deref(), Some("ja"));
+        assert_eq!(language_from_locale("en_US").as_deref(), Some("en"));
+        assert_eq!(language_from_locale("zh-Hans-CN").as_deref(), Some("zh"));
+        assert_eq!(language_from_locale("EN").as_deref(), Some("en"));
+        assert_eq!(language_from_locale("fr").as_deref(), Some("fr"));
+        assert_eq!(language_from_locale(""), None);
+        assert_eq!(language_from_locale("  "), None);
+    }
+
+    #[test]
+    fn detect_system_language_is_non_empty() {
+        // get_locale() の戻り値は環境依存だが、失敗時も "ja" にフォールバックするため
+        // 常に非空の言語コードを返すことを保証する。
+        assert!(!detect_system_language().is_empty());
+    }
 
     #[test]
     fn default_settings_are_sane() {
