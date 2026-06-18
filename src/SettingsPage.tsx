@@ -176,6 +176,12 @@ const IconCheck = ({ className }: { className?: string }) => (
     <path d="M8.5 12.2l2.3 2.3 4.7-4.8" />
   </Svg>
 );
+const IconCopy = ({ className }: { className?: string }) => (
+  <Svg className={className}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </Svg>
+);
 
 // --------------- 共通レイアウト要素 ---------------
 
@@ -887,18 +893,6 @@ function KeybindingsSection({
                       <IconWarning className="size-4" />
                     </span>
                   )}
-                  <Switch
-                    isSelected={binding.enabled}
-                    onChange={() => toggleBinding(binding.id)}
-                    aria-label="有効・無効を切り替え"
-                    size="sm"
-                  >
-                    <Switch.Content>
-                      <Switch.Control>
-                        <Switch.Thumb />
-                      </Switch.Control>
-                    </Switch.Content>
-                  </Switch>
                   <div className="ml-1 flex items-center gap-1.5">
                     <Button
                       isIconOnly
@@ -909,6 +903,19 @@ function KeybindingsSection({
                     >
                       <IconPencil className="size-4" />
                     </Button>
+                    <Switch
+                      isSelected={binding.enabled}
+                      onChange={() => toggleBinding(binding.id)}
+                      aria-label="有効・無効を切り替え"
+                      size="sm"
+                      className="mx-0.5"
+                    >
+                      <Switch.Content>
+                        <Switch.Control>
+                          <Switch.Thumb />
+                        </Switch.Control>
+                      </Switch.Content>
+                    </Switch>
                     <Button
                       isIconOnly
                       size="sm"
@@ -1335,10 +1342,10 @@ function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => 
       {items.length === 0 ? (
         <div className="w-full py-10 text-center text-sm text-muted">履歴がありません</div>
       ) : (
-        <ul className="flex w-full flex-col gap-1.5">
+        <ul className="flex w-full flex-col gap-3">
           {items.map((item) => (
             <li key={item.id}>
-              <Card variant="default" className="w-full">
+              <Card variant="secondary" className="w-full border border-separator">
                 <div className="flex items-end gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="leading-snug break-words text-foreground">{item.text}</div>
@@ -1347,14 +1354,23 @@ function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => 
                       {item.translated ? " → 英語" : ""} · {item.duration_ms}ms
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant={copiedId === item.id ? "ghost" : "outline"}
-                    className={copiedId === item.id ? "text-success" : ""}
-                    onPress={() => handleCopy(item.id, item.text)}
-                  >
-                    {copiedId === item.id ? "✓ コピー済み" : "コピー"}
-                  </Button>
+                  <div className="relative shrink-0">
+                    {copiedId === item.id && (
+                      <div className="pointer-events-none absolute bottom-full right-0 z-10 mb-2 whitespace-nowrap rounded-lg bg-foreground px-2.5 py-1 text-xs font-medium text-background shadow-lg">
+                        コピーしました
+                        <span className="absolute -bottom-1 right-3 size-2 rotate-45 bg-foreground" />
+                      </div>
+                    )}
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="outline"
+                      onPress={() => handleCopy(item.id, item.text)}
+                      aria-label="クリップボードにコピー"
+                    >
+                      <IconCopy className="size-4" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             </li>
