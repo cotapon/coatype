@@ -149,7 +149,7 @@ pub async fn active_shortcut(
 /// 本番の録音と同じく非同期ランタイム上で `pipeline.start()` を呼ぶ。
 #[tauri::command]
 pub async fn start_test_recording(pipeline: State<'_, Arc<Pipeline>>) -> Result<(), String> {
-    pipeline.start().map_err(|e| e.to_string())
+    pipeline.start(None).map_err(|e| e.to_string())
 }
 
 /// 録音テスト停止: 録音を停止して文字起こし結果を返す (履歴・挿入なし)。

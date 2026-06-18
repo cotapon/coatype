@@ -1,5 +1,5 @@
 use crate::api::whisper::WhisperClient;
-use crate::audio::recorder::Recorder;
+use crate::audio::recorder::{LevelCb, Recorder};
 use crate::config::settings::ProviderConfig;
 use crate::dictionary::llm_correct::LlmCorrectClient;
 use crate::dictionary::replace::Dictionary;
@@ -93,9 +93,9 @@ impl Pipeline {
 
     // ── 録音 / 処理 ───────────────────────────────────────────────
 
-    pub fn start(&self) -> anyhow::Result<()> {
+    pub fn start(&self, on_level: Option<LevelCb>) -> anyhow::Result<()> {
         tracing::info!("recording: start");
-        self.recorder.lock().unwrap().start()?;
+        self.recorder.lock().unwrap().start(on_level)?;
         *self.started_at.lock().unwrap() = Some(Instant::now());
         Ok(())
     }

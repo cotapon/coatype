@@ -3,6 +3,14 @@ use hound::{WavSpec, WavWriter};
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 
+/// 録音中の音量レベル (RMS, 0.0〜1.0 付近) を受け取るコールバック。
+/// オーバーレイの波形表示用に、録音ループから定期的に呼ばれる。
+///
+/// これは cpal の音声入力コールバックスレッド上で呼ばれるため、
+/// 中で重い処理 (IPC など) をしてはならない。値をチャネルに送るなどの
+/// 非ブロッキングな処理に留め、実際の emit は別スレッドで行うこと。
+pub type LevelCb = Box<dyn FnMut(f32) + Send>;
+
 pub struct Recorder {
     samples: Arc<Mutex<Vec<i16>>>,
     sample_rate: u32,
@@ -23,7 +31,7 @@ impl Recorder {
         }
     }
 
-    pub fn start(&mut self) -> anyhow::Result<()> {
+    pub fn start(&mut self, on_level: Option<LevelCb>) -> anyhow::Result<()> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -41,25 +49,39 @@ impl Recorder {
         let samples = Arc::clone(&self.samples);
         samples.lock().unwrap().clear();
 
+        // ~30fps 相当でレベルを通知するためのサンプル数 (モノラル換算の概算)。
+        let level_step = (self.sample_rate as usize / 30).max(1);
+
         let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &config.into(),
-                move |data: &[f32], _| {
-                    let mut buf = samples.lock().unwrap();
-                    buf.extend(
-                        data.iter()
-                            .map(|&s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16),
-                    );
-                },
-                |err| tracing::error!("stream error: {err}"),
-                None,
-            )?,
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                &config.into(),
-                move |data: &[i16], _| samples.lock().unwrap().extend_from_slice(data),
-                |err| tracing::error!("stream error: {err}"),
-                None,
-            )?,
+            cpal::SampleFormat::F32 => {
+                let mut acc = LevelAccumulator::new(level_step, on_level);
+                device.build_input_stream(
+                    &config.into(),
+                    move |data: &[f32], _| {
+                        let mut buf = samples.lock().unwrap();
+                        buf.extend(
+                            data.iter()
+                                .map(|&s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16),
+                        );
+                        drop(buf);
+                        acc.push_iter(data.iter().map(|&s| s.clamp(-1.0, 1.0) as f64));
+                    },
+                    |err| tracing::error!("stream error: {err}"),
+                    None,
+                )?
+            }
+            cpal::SampleFormat::I16 => {
+                let mut acc = LevelAccumulator::new(level_step, on_level);
+                device.build_input_stream(
+                    &config.into(),
+                    move |data: &[i16], _| {
+                        samples.lock().unwrap().extend_from_slice(data);
+                        acc.push_iter(data.iter().map(|&s| s as f64 / i16::MAX as f64));
+                    },
+                    |err| tracing::error!("stream error: {err}"),
+                    None,
+                )?
+            }
             other => anyhow::bail!("unsupported sample format: {other:?}"),
         };
         stream.play()?;
@@ -91,6 +113,45 @@ impl Recorder {
 impl Default for Recorder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 録音ループのコールバック内でサンプルを溜め、一定数ごとに RMS を計算して
+/// `on_level` へ通知する。コールバックは高頻度で呼ばれるため、ここで間引く。
+struct LevelAccumulator {
+    step: usize,
+    on_level: Option<LevelCb>,
+    sum_sq: f64,
+    count: usize,
+}
+
+impl LevelAccumulator {
+    fn new(step: usize, on_level: Option<LevelCb>) -> Self {
+        Self {
+            step,
+            on_level,
+            sum_sq: 0.0,
+            count: 0,
+        }
+    }
+
+    /// 正規化済みサンプル (-1.0〜1.0) のイテレータを受け取り、必要なら通知する。
+    fn push_iter(&mut self, samples: impl Iterator<Item = f64>) {
+        if self.on_level.is_none() {
+            return;
+        }
+        for v in samples {
+            self.sum_sq += v * v;
+            self.count += 1;
+            if self.count >= self.step {
+                let rms = (self.sum_sq / self.count as f64).sqrt() as f32;
+                if let Some(cb) = &mut self.on_level {
+                    cb(rms);
+                }
+                self.sum_sq = 0.0;
+                self.count = 0;
+            }
+        }
     }
 }
 

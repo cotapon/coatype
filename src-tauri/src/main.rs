@@ -166,7 +166,22 @@ fn main() {
                                     *prev_pid.lock().unwrap() =
                                         coatype_lib::focus::capture_frontmost_pid();
                                 }
-                                match pipeline_clone.start() {
+                                // 音量通知は音声入力コールバックスレッド上で呼ばれるため、
+                                // ここでは値をチャネルに送るだけにして、実際の emit (IPC) は
+                                // 別スレッドで行う。録音停止でストリームが drop されると
+                                // 送信側クロージャも drop され、recv が Err になってスレッドが終わる。
+                                let (level_tx, level_rx) = std::sync::mpsc::channel::<f32>();
+                                let on_level: coatype_lib::audio::recorder::LevelCb =
+                                    Box::new(move |lvl: f32| {
+                                        let _ = level_tx.send(lvl);
+                                    });
+                                let level_handle = handle.clone();
+                                std::thread::spawn(move || {
+                                    while let Ok(lvl) = level_rx.recv() {
+                                        let _ = level_handle.emit("audio-level", lvl);
+                                    }
+                                });
+                                match pipeline_clone.start(Some(on_level)) {
                                     Ok(()) => {
                                         is_recording = true;
                                         let _ = handle.emit("recording-state", "started");
