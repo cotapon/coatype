@@ -1465,7 +1465,7 @@ function ApiKeyPane({
 
       <Card variant="default" className="w-full">
         <p className="text-xs leading-relaxed text-muted">
-          キーは macOS Keychain (<code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">jp.co.cyberagent.coatype</code>) に保存されます。<br />
+          キーは macOS Keychain (<code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">jp.co.cotapon.coatype</code>) に保存されます。<br />
           環境変数 <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">COATYPE_API_KEY</code> が設定されている場合はそちらが優先されます。<br />
           STT/LLM を個別に設定する場合は <strong>モデル設定</strong> の
           <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">separate_api_keys</code> を有効化してください（設定ファイルで直接指定可能）。

@@ -1,7 +1,7 @@
 [package]
 name = "coatype"
 version = "1.0.0"
-description = "CoAType - Voice Typing for CyberAgent"
+description = "CoAType - Voice Typing for cotapon"
 authors = ["you"]
 edition = "2021"
 

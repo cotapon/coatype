@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 
-const SERVICE: &str = "jp.co.cyberagent.coatype";
+const SERVICE: &str = "jp.co.cotapon.coatype";
 pub const ACCOUNT_COMMON: &str = "api-key";
 pub const ACCOUNT_STT: &str = "api-key-stt";
 pub const ACCOUNT_LLM: &str = "api-key-llm";

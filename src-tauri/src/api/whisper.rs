@@ -35,6 +35,12 @@ impl WhisperClient {
         *self.api_key.lock().unwrap() = key;
     }
 
+    /// STT エンドポイントと API キーが両方設定済みかを返す。
+    /// どちらかが空なら録音前の事前チェックで弾く。
+    pub fn is_configured(&self) -> bool {
+        !self.base.trim().is_empty() && !self.api_key.lock().unwrap().trim().is_empty()
+    }
+
     pub async fn transcribe(
         &self,
         wav: &[u8],
