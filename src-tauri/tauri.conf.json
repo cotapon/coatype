@@ -66,7 +66,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_OUTPUT_OF_tauri_signer_generate",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyM0RCRkM5NjBBNEIyQTkKUldTcHNxUmd5Yjg5SXExMVpjWVVOZmRKWER1eDFHejBzK3FUUmc1aWN5b1NpdGlNWWlPelBjdFEK",
       "endpoints": [
         "https://github.com/cotapon/coatype/releases/latest/download/latest.json"
       ]
