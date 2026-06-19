@@ -1,7 +1,6 @@
 use crate::api::whisper::WhisperClient;
 use crate::audio::recorder::{LevelCb, Recorder};
 use crate::config::settings::ProviderConfig;
-use crate::dictionary::llm_correct::LlmCorrectClient;
 use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryStore;
 use std::sync::{Arc, Mutex};
@@ -16,12 +15,10 @@ pub struct Pipeline {
     pub recorder: Mutex<Recorder>,
     // ダブル Arc パターン: 外側の Mutex で swap、内側の Arc でクローン後に非同期呼び出し
     pub client: Arc<Mutex<Arc<WhisperClient>>>,
-    pub llm: Arc<Mutex<Option<Arc<LlmCorrectClient>>>>,
     pub dict: Arc<Mutex<Dictionary>>,
     pub history: Arc<HistoryStore>,
     pub translate: Arc<Mutex<bool>>,
     pub language: Arc<Mutex<String>>,
-    pub llm_correct: Arc<Mutex<bool>>,
     started_at: Mutex<Option<Instant>>,
     pub current_task: Mutex<Option<CurrentTask>>,
 }
@@ -29,22 +26,18 @@ pub struct Pipeline {
 impl Pipeline {
     pub fn new(
         client: WhisperClient,
-        llm: Option<LlmCorrectClient>,
         dict: Dictionary,
         history: Arc<HistoryStore>,
         language: String,
         translate: bool,
-        llm_correct: bool,
     ) -> Self {
         Self {
             recorder: Mutex::new(Recorder::new()),
             client: Arc::new(Mutex::new(Arc::new(client))),
-            llm: Arc::new(Mutex::new(llm.map(Arc::new))),
             dict: Arc::new(Mutex::new(dict)),
             history,
             translate: Arc::new(Mutex::new(translate)),
             language: Arc::new(Mutex::new(language)),
-            llm_correct: Arc::new(Mutex::new(llm_correct)),
             started_at: Mutex::new(None),
             current_task: Mutex::new(None),
         }
@@ -53,20 +46,7 @@ impl Pipeline {
     // ── API キー更新 ──────────────────────────────────────────────
 
     pub fn update_api_key(&self, key: String) {
-        self.client.lock().unwrap().set_api_key(key.clone());
-        if let Some(llm) = &*self.llm.lock().unwrap() {
-            llm.set_api_key(key);
-        }
-    }
-
-    pub fn update_stt_api_key(&self, key: String) {
         self.client.lock().unwrap().set_api_key(key);
-    }
-
-    pub fn update_llm_api_key(&self, key: String) {
-        if let Some(llm) = &*self.llm.lock().unwrap() {
-            llm.set_api_key(key);
-        }
     }
 
     // ── クライアント再構築 ───────────────────────────────────────
@@ -79,16 +59,6 @@ impl Pipeline {
             api_key,
         ));
         *self.client.lock().unwrap() = new_client;
-    }
-
-    pub fn rebuild_llm_client(&self, config: &ProviderConfig, api_key: String) {
-        let new_client = Arc::new(LlmCorrectClient::new(
-            config.base_url.clone(),
-            config.model.clone(),
-            config.auth_kind.clone(),
-            api_key,
-        ));
-        *self.llm.lock().unwrap() = Some(new_client);
     }
 
     // ── 録音 / 処理 ───────────────────────────────────────────────
@@ -154,31 +124,7 @@ impl Pipeline {
             tracing::debug!("dict: {:?} -> {:?}", raw, after_dict);
         }
 
-        let final_text = if *self.llm_correct.lock().unwrap() {
-            let llm_opt = self.llm.lock().unwrap().clone();
-            if let Some(llm) = llm_opt {
-                tracing::info!("llm: correct request");
-                let entries: Vec<(String, String)> = self
-                    .dict
-                    .lock()
-                    .unwrap()
-                    .entries
-                    .iter()
-                    .map(|e| (e.from.clone(), e.to.clone()))
-                    .collect();
-                let result = llm.correct(&after_dict, &entries).await.unwrap_or_else(|e| {
-                    tracing::warn!("llm: correct failed: {e}");
-                    after_dict.clone()
-                });
-                tracing::info!("llm: result {:?}", result);
-                result
-            } else {
-                tracing::debug!("llm: skipped (no client)");
-                after_dict
-            }
-        } else {
-            after_dict
-        };
+        let final_text = after_dict;
 
         self.history.insert(&final_text, &language, translate, elapsed)?;
         Ok(final_text)

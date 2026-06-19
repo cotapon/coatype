@@ -48,13 +48,8 @@ pub struct Settings {
     pub bindings: Vec<KeyBinding>,
     pub translate_mode: bool,
     pub translate_model: Option<String>,
-    pub llm_correct: bool,
     #[serde(default)]
     pub stt: ProviderConfig,
-    #[serde(default)]
-    pub llm: ProviderConfig,
-    #[serde(default)]
-    pub separate_api_keys: bool,
     #[serde(default = "default_true")]
     pub show_overlay: bool,
     // 旧 api_base フィールドの読み取り専用エイリアス
@@ -108,18 +103,11 @@ impl Default for Settings {
             }],
             translate_mode: false,
             translate_model: None,
-            llm_correct: false,
             stt: ProviderConfig {
-                base_url: base.clone(),
+                base_url: base,
                 model: "whisper-large-v3".into(),
                 auth_kind: AuthKind::Bearer,
             },
-            llm: ProviderConfig {
-                base_url: base,
-                model: "gpt-4o-mini".into(),
-                auth_kind: AuthKind::Bearer,
-            },
-            separate_api_keys: false,
             show_overlay: true,
             legacy_api_base: None,
             shortcut: None,
@@ -136,26 +124,17 @@ impl Settings {
     fn migrate_legacy(&mut self) {
         let base = Self::default_base();
 
-        // 旧 api_base を stt/llm に転写
+        // 旧 api_base を stt に転写
         if let Some(old) = self.legacy_api_base.take() {
             if self.stt.base_url.is_empty() {
-                self.stt.base_url = old.clone();
-            }
-            if self.llm.base_url.is_empty() {
-                self.llm.base_url = old;
+                self.stt.base_url = old;
             }
         }
         if self.stt.base_url.is_empty() {
-            self.stt.base_url = base.clone();
-        }
-        if self.llm.base_url.is_empty() {
-            self.llm.base_url = base;
+            self.stt.base_url = base;
         }
         if self.stt.model.is_empty() {
             self.stt.model = "whisper-large-v3".into();
-        }
-        if self.llm.model.is_empty() {
-            self.llm.model = "gpt-4o-mini".into();
         }
 
         // 削除されたアクション (paste_last 等) を持つバインドを除去
@@ -237,8 +216,6 @@ mod tests {
         assert_eq!(s.bindings[0].combo, "rightoption");
         assert!(matches!(s.bindings[0].action, ActionKind::StartRecord));
         assert_eq!(s.stt.model, "whisper-large-v3");
-        assert_eq!(s.llm.model, "gpt-4o-mini");
-        assert!(!s.separate_api_keys);
     }
 
     #[test]
@@ -255,8 +232,7 @@ mod tests {
             "language": "ja",
             "shortcut": "rightoption",
             "trigger_mode": "push_to_talk",
-            "translate_mode": false,
-            "llm_correct": false
+            "translate_mode": false
         }"#;
         let mut s: Settings = serde_json::from_str(json).unwrap();
         s.migrate_legacy();
@@ -273,8 +249,7 @@ mod tests {
             "language": "ja",
             "shortcut": "f5",
             "trigger_mode": "toggle",
-            "translate_mode": false,
-            "llm_correct": false
+            "translate_mode": false
         }"#;
         let mut s: Settings = serde_json::from_str(json).unwrap();
         s.migrate_legacy();
@@ -290,7 +265,6 @@ mod tests {
             "shortcut": "f5",
             "trigger_mode": "toggle",
             "translate_mode": false,
-            "llm_correct": false,
             "bindings": [
                 {"id": "b1", "action": "start_record", "combo": "rightoption", "enabled": true}
             ]
@@ -302,21 +276,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_api_base_migrates_to_stt_and_llm() {
+    fn legacy_api_base_migrates_to_stt() {
         let json = r#"{
             "language": "ja",
             "shortcut": "rightoption",
             "trigger_mode": "push_to_talk",
             "translate_mode": false,
-            "llm_correct": false,
             "api_base": "https://custom.endpoint.example"
         }"#;
         let mut s: Settings = serde_json::from_str(json).unwrap();
         s.migrate_legacy();
         assert_eq!(s.stt.base_url, "https://custom.endpoint.example");
-        assert_eq!(s.llm.base_url, "https://custom.endpoint.example");
         assert_eq!(s.stt.model, "whisper-large-v3");
-        assert_eq!(s.llm.model, "gpt-4o-mini");
         assert!(s.legacy_api_base.is_none());
     }
 
@@ -327,7 +298,6 @@ mod tests {
             "shortcut": "rightoption",
             "trigger_mode": "push_to_talk",
             "translate_mode": false,
-            "llm_correct": false,
             "api_base": "https://custom.endpoint.example"
         }"#;
         let mut s: Settings = serde_json::from_str(json).unwrap();
@@ -348,17 +318,14 @@ mod tests {
                 {"id": "b2", "action": "cancel", "combo": "escape", "enabled": true}
             ],
             "translate_mode": true,
-            "llm_correct": true,
-            "stt": {"base_url": "https://api.openai.com", "model": "whisper-1", "auth_kind": {"kind": "bearer"}},
-            "llm": {"base_url": "https://api.openai.com", "model": "gpt-4", "auth_kind": {"kind": "bearer"}},
-            "separate_api_keys": true
+            "stt": {"base_url": "https://api.openai.com", "model": "whisper-1", "auth_kind": {"kind": "bearer"}}
         }"#;
         let mut s: Settings = serde_json::from_str(json).unwrap();
         s.migrate_legacy();
         assert_eq!(s.bindings.len(), 2);
         assert_eq!(s.bindings[0].id, "b1");
         assert_eq!(s.bindings[1].action, ActionKind::Cancel);
-        assert!(s.separate_api_keys);
+        assert_eq!(s.stt.model, "whisper-1");
     }
 
     #[test]
@@ -367,10 +334,7 @@ mod tests {
             "language": "ja",
             "bindings": [],
             "translate_mode": false,
-            "llm_correct": false,
-            "stt": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}},
-            "llm": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}},
-            "separate_api_keys": false
+            "stt": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}}
         }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
         assert!(s.show_overlay, "show_overlay が JSON にない場合は true がデフォルト");

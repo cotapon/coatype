@@ -22,10 +22,7 @@ export interface Settings {
   language: string;
   bindings: KeyBinding[];
   translate_mode: boolean;
-  llm_correct: boolean;
   stt: ProviderConfig;
-  llm: ProviderConfig;
-  separate_api_keys: boolean;
   show_overlay: boolean;
 }
 

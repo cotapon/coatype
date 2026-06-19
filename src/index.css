@@ -1,6 +1,19 @@
 @import "tailwindcss";
 @import "@heroui/styles";
 
+/* プライマリーカラー (HeroUI v3 の accent) を Mint に変更。
+   --accent-hover / --accent-soft などは accent から自動算出される。 */
+:root {
+  --accent: oklch(0.72 0.13 170);
+  --accent-foreground: var(--eclipse);
+}
+
+.dark,
+[data-theme="dark"] {
+  --accent: oklch(0.81 0.12 170);
+  --accent-foreground: var(--eclipse);
+}
+
 html,
 body {
   width: 100%;
