@@ -40,6 +40,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -61,6 +62,14 @@
         "installMode": "currentUser",
         "languages": ["English", "Japanese"]
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_OUTPUT_OF_tauri_signer_generate",
+      "endpoints": [
+        "https://github.com/cotapon/coatype/releases/latest/download/latest.json"
+      ]
     }
   }
 }

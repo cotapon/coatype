@@ -41,6 +41,8 @@ import {
   startTestRecording, stopTestRecording,
 } from "./invoke";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
+import { checkForUpdate, downloadAndInstallUpdate } from "./updater";
+import type { Update } from "./updater";
 import { LANGUAGES } from "./languages";
 import logoUrl from "./assets/logo.png";
 
@@ -474,6 +476,43 @@ function GeneralPane({
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  // アップデート状態
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState<Update | null>(null);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "latest" | "error">("idle");
+
+  const handleCheckUpdate = async () => {
+    setUpdateChecking(true);
+    setUpdateStatus("idle");
+    setUpdateAvailable(null);
+    try {
+      const update = await checkForUpdate();
+      if (update) {
+        setUpdateAvailable(update);
+      } else {
+        setUpdateStatus("latest");
+      }
+    } catch (e) {
+      onError(`アップデートチェック失敗: ${e}`);
+      setUpdateStatus("error");
+    } finally {
+      setUpdateChecking(false);
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!updateAvailable) return;
+    setUpdateInstalling(true);
+    try {
+      await downloadAndInstallUpdate(updateAvailable);
+      // relaunch が呼ばれるのでここには到達しないが念のため
+    } catch (e) {
+      onError(`アップデートインストール失敗: ${e}`);
+      setUpdateInstalling(false);
+    }
+  };
+
   const langOption = LANGUAGES.find((l) => l.code === settings.language);
   const langLabel = langOption ? `${langOption.label} (${langOption.code})` : settings.language;
 
@@ -571,6 +610,49 @@ function GeneralPane({
             isSelected={settings.show_overlay}
             onChange={(v) => set({ show_overlay: v })}
           />
+        </Panel>
+      </Section>
+
+      <Section title="アップデート">
+        <Panel className="p-4">
+          {updateAvailable ? (
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  バージョン {updateAvailable.version} が利用可能です
+                </p>
+                {updateAvailable.body && (
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-muted">{updateAvailable.body}</p>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  variant="primary"
+                  onPress={handleInstallUpdate}
+                  isDisabled={updateInstalling}
+                  className="shrink-0"
+                >
+                  {updateInstalling ? <><Spinner className="size-4" /> インストール中…</> : "今すぐ更新"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-muted">
+                {updateStatus === "latest"
+                  ? "最新バージョンを使用しています。"
+                  : "新しいバージョンが利用可能か確認します。"}
+              </p>
+              <Button
+                variant="secondary"
+                onPress={handleCheckUpdate}
+                isDisabled={updateChecking}
+                className="shrink-0"
+              >
+                {updateChecking ? <><Spinner className="size-4" /> 確認中…</> : "更新を確認"}
+              </Button>
+            </div>
+          )}
         </Panel>
       </Section>
 
