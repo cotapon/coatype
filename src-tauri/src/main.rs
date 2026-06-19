@@ -6,11 +6,10 @@ use coatype_lib::commands::{
     ShowOverlay, bindings_to_registered,
 };
 use coatype_lib::config::settings::Settings;
-use coatype_lib::dictionary::llm_correct::LlmCorrectClient;
 use coatype_lib::dictionary::replace::Dictionary;
 use coatype_lib::history::store::HistoryStore;
 use coatype_lib::pipeline::{CurrentTask, Pipeline};
-use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_LLM, ACCOUNT_STT};
+use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON};
 use coatype_lib::shortcut::listener::{self, RecordMode, ShortcutEvent};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -38,14 +37,7 @@ fn main() {
             let dict = Dictionary::load(&dict_path);
             let history = Arc::new(HistoryStore::open(&db_path)?);
 
-            let stt_key = keychain::resolve_api_key_for(
-                if settings.separate_api_keys { ACCOUNT_STT } else { ACCOUNT_COMMON },
-            )
-            .unwrap_or_default();
-            let llm_key = keychain::resolve_api_key_for(
-                if settings.separate_api_keys { ACCOUNT_LLM } else { ACCOUNT_COMMON },
-            )
-            .unwrap_or_default();
+            let stt_key = keychain::resolve_api_key_for(ACCOUNT_COMMON).unwrap_or_default();
 
             let whisper = WhisperClient::new(
                 settings.stt.base_url.clone(),
@@ -53,21 +45,13 @@ fn main() {
                 settings.stt.auth_kind.clone(),
                 stt_key,
             );
-            let llm = LlmCorrectClient::new(
-                settings.llm.base_url.clone(),
-                settings.llm.model.clone(),
-                settings.llm.auth_kind.clone(),
-                llm_key,
-            );
 
             let pipeline = Arc::new(Pipeline::new(
                 whisper,
-                Some(llm),
                 dict,
                 history,
                 settings.language.clone(),
                 settings.translate_mode,
-                settings.llm_correct,
             ));
 
             let active_shortcut_state = Arc::new(Mutex::new(ActiveShortcut {
@@ -225,6 +209,8 @@ fn main() {
             coatype_lib::commands::save_settings,
             coatype_lib::commands::get_dictionary,
             coatype_lib::commands::save_dictionary,
+            coatype_lib::commands::import_dictionary,
+            coatype_lib::commands::export_dictionary,
             coatype_lib::commands::list_history,
             coatype_lib::commands::clear_history,
             coatype_lib::commands::save_api_key,

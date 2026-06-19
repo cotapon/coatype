@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   Alert,
   Button,
@@ -33,6 +32,7 @@ import {
 import {
   getSettings, saveSettings,
   getDictionary, saveDictionary,
+  importDictionary, exportDictionary,
   listHistory, clearHistory,
   saveApiKey, hasApiKey,
   checkAccessibility, openAccessibilitySettings,
@@ -40,7 +40,9 @@ import {
   setListenerPaused,
   startTestRecording, stopTestRecording,
 } from "./invoke";
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { LANGUAGES } from "./languages";
+import logoUrl from "./assets/logo.png";
 
 type Pane = "general" | "models" | "apikey" | "dictionary" | "history";
 
@@ -170,16 +172,24 @@ const IconWarning = ({ className }: { className?: string }) => (
     <circle cx="12" cy="16.5" r="0.8" fill="currentColor" stroke="none" />
   </Svg>
 );
-const IconCheck = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M8.5 12.2l2.3 2.3 4.7-4.8" />
-  </Svg>
-);
 const IconCopy = ({ className }: { className?: string }) => (
   <Svg className={className}>
     <rect x="9" y="9" width="11" height="11" rx="2" />
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </Svg>
+);
+const IconUpload = ({ className }: { className?: string }) => (
+  <Svg className={className}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </Svg>
+);
+const IconDownload = ({ className }: { className?: string }) => (
+  <Svg className={className}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="3" x2="12" y2="15" />
   </Svg>
 );
 
@@ -237,7 +247,7 @@ const PANES: { id: Pane; Icon: React.ComponentType<{ className?: string }>; labe
 
 const PANE_META: Record<Pane, { title: string; subtitle: string }> = {
   general:    { title: "一般設定",       subtitle: "CoAType の基本設定をカスタマイズします" },
-  models:     { title: "モデル設定",     subtitle: "STT と LLM 補正で使うエンドポイント・モデルを設定します" },
+  models:     { title: "モデル設定",     subtitle: "STT で使うエンドポイント・モデルを設定します" },
   apikey:     { title: "API キー",       subtitle: "API キーは macOS Keychain に安全に保存されます" },
   dictionary: { title: "辞書・語彙",     subtitle: "文字起こし結果を辞書で自動補正します" },
   history:    { title: "文字起こし履歴", subtitle: "過去の文字起こし結果を確認します" },
@@ -249,16 +259,11 @@ export function SettingsPage() {
   const [initialSettings, setInitialSettings] = useState<Settings | null>(null);
   const [dict, setDict] = useState<Dictionary>({ entries: [] });
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [commonKey, setCommonKey] = useState("");
-  const [sttKey, setSttKey] = useState("");
-  const [llmKey, setLlmKey] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [keyExists, setKeyExists] = useState(false);
-  const [sttKeyExists, setSttKeyExists] = useState(false);
-  const [llmKeyExists, setLlmKeyExists] = useState(false);
   const [accessibilityOk, setAccessibilityOk] = useState(true);
   const [listenerState, setListenerState] = useState<ActiveShortcut | null>(null);
   const [banner, setBanner] = useState<{ type: "saved" | "error"; text: string } | null>(null);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const settingsLoaded = useRef(false);
   const dictLoaded = useRef(false);
@@ -267,9 +272,7 @@ export function SettingsPage() {
     activeShortcut().then(setListenerState).catch(console.error);
 
   const refreshKeyStatus = () => {
-    hasApiKey("common").then(setKeyExists).catch(console.error);
-    hasApiKey("stt").then(setSttKeyExists).catch(console.error);
-    hasApiKey("llm").then(setLlmKeyExists).catch(console.error);
+    hasApiKey().then(setKeyExists).catch(console.error);
   };
 
   useEffect(() => {
@@ -334,13 +337,11 @@ export function SettingsPage() {
     if (type === "saved") setTimeout(() => setBanner(null), 2000);
   };
 
-  const handleSaveApiKey = async (provider: "stt" | "llm" | "common", key: string) => {
+  const handleSaveApiKey = async (key: string) => {
     try {
-      await saveApiKey(key, provider);
+      await saveApiKey(key);
       refreshKeyStatus();
-      if (provider === "stt") setSttKey("");
-      else if (provider === "llm") setLlmKey("");
-      else setCommonKey("");
+      setApiKey("");
       flash("saved", "APIキーを保存しました ✓");
     } catch (e) { flash("error", String(e)); }
   };
@@ -352,11 +353,6 @@ export function SettingsPage() {
 
   const handleReset = () => {
     if (initialSettings) setSettings(initialSettings);
-    setShowResetConfirm(false);
-  };
-
-  const handleDone = () => {
-    getCurrentWebviewWindow().hide().catch(console.error);
   };
 
   if (!settings) {
@@ -405,8 +401,8 @@ export function SettingsPage() {
           </div>
 
           <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-accent">
-              <IconWaveform className="size-[18px]" />
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-white p-1">
+              <img src={logoUrl} alt="CoAType" className="size-full object-contain" />
             </div>
             <div className="min-w-0 leading-tight">
               <div className="text-sm font-semibold text-foreground">CoAType</div>
@@ -432,6 +428,7 @@ export function SettingsPage() {
                     }
                     listenerState={listenerState}
                     onError={(t) => flash("error", t)}
+                    onReset={handleReset}
                   />
                 )}
                 {pane === "models" && (
@@ -439,21 +436,14 @@ export function SettingsPage() {
                 )}
                 {pane === "apikey" && (
                   <ApiKeyPane
-                    separateKeys={settings.separate_api_keys}
-                    commonKey={commonKey}
-                    sttKey={sttKey}
-                    llmKey={llmKey}
+                    apiKey={apiKey}
                     keyExists={keyExists}
-                    sttKeyExists={sttKeyExists}
-                    llmKeyExists={llmKeyExists}
-                    onCommonKeyChange={setCommonKey}
-                    onSttKeyChange={setSttKey}
-                    onLlmKeyChange={setLlmKey}
+                    onApiKeyChange={setApiKey}
                     onSave={handleSaveApiKey}
                   />
                 )}
                 {pane === "dictionary" && (
-                  <DictionaryPane dict={dict} onChange={setDict} />
+                  <DictionaryPane dict={dict} onChange={setDict} flash={flash} />
                 )}
                 {pane === "history" && (
                   <HistoryPane items={history} onClear={handleClearHistory} />
@@ -464,48 +454,6 @@ export function SettingsPage() {
         </main>
       </div>
 
-      {/* フッターバー */}
-      <footer className="flex shrink-0 items-center justify-between border-t border-border px-6 py-3">
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <IconCheck className="size-4 text-accent" />
-          すべての変更は自動的に保存されます
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onPress={() => setShowResetConfirm(true)}>
-            リセット
-          </Button>
-          <Button variant="primary" onPress={handleDone}>
-            完了
-          </Button>
-        </div>
-      </footer>
-
-      {showResetConfirm && (
-        <Modal.Backdrop
-          variant="blur"
-          isOpen
-          onOpenChange={(open) => { if (!open) setShowResetConfirm(false); }}
-        >
-          <Modal.Container>
-            <Modal.Dialog className="sm:max-w-[400px]">
-              <Modal.Header>
-                <Modal.Heading>設定をリセットしますか？</Modal.Heading>
-                <p className="mt-1.5 text-sm text-muted">
-                  この画面を開いた時点の設定に戻します。今回行った変更は破棄されます。
-                </p>
-              </Modal.Header>
-              <Modal.Footer>
-                <Button variant="secondary" onPress={() => setShowResetConfirm(false)}>
-                  キャンセル
-                </Button>
-                <Button variant="danger" onPress={handleReset}>
-                  リセット
-                </Button>
-              </Modal.Footer>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      )}
     </div>
   );
 }
@@ -513,7 +461,7 @@ export function SettingsPage() {
 // --------------- General ---------------
 
 function GeneralPane({
-  settings, onChange, accessibilityOk, onRefreshAccessibility, listenerState, onError,
+  settings, onChange, accessibilityOk, onRefreshAccessibility, listenerState, onError, onReset,
 }: {
   settings: Settings;
   onChange: (s: Settings) => void;
@@ -521,8 +469,10 @@ function GeneralPane({
   onRefreshAccessibility: () => void;
   listenerState: ActiveShortcut | null;
   onError: (text: string) => void;
+  onReset: () => void;
 }) {
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const langOption = LANGUAGES.find((l) => l.code === settings.language);
   const langLabel = langOption ? `${langOption.label} (${langOption.code})` : settings.language;
@@ -616,12 +566,6 @@ function GeneralPane({
             onChange={(v) => set({ translate_mode: v })}
           />
           <OptionRow
-            title="LLM辞書補正（実験的）"
-            description="文字起こし後にLLMで辞書と照合して補正します"
-            isSelected={settings.llm_correct}
-            onChange={(v) => set({ llm_correct: v })}
-          />
-          <OptionRow
             title="録音中オーバーレイを表示する"
             description="録音・処理中にインジケーターを画面下部に表示します"
             isSelected={settings.show_overlay}
@@ -629,6 +573,44 @@ function GeneralPane({
           />
         </Panel>
       </Section>
+
+      <Section title="設定のリセット">
+        <Panel className="p-4">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-sm text-muted">この画面を開いた時点の設定に戻します。今回行った変更は破棄されます。</p>
+            <Button variant="danger" onPress={() => setShowResetConfirm(true)} className="shrink-0">
+              設定をリセット
+            </Button>
+          </div>
+        </Panel>
+      </Section>
+
+      {showResetConfirm && (
+        <Modal.Backdrop
+          variant="blur"
+          isOpen
+          onOpenChange={(open) => { if (!open) setShowResetConfirm(false); }}
+        >
+          <Modal.Container>
+            <Modal.Dialog className="sm:max-w-[400px]">
+              <Modal.Header>
+                <Modal.Heading>設定をリセットしますか？</Modal.Heading>
+                <p className="mt-1.5 text-sm text-muted">
+                  この画面を開いた時点の設定に戻します。今回行った変更は破棄されます。
+                </p>
+              </Modal.Header>
+              <Modal.Footer>
+                <Button variant="secondary" onPress={() => setShowResetConfirm(false)}>
+                  キャンセル
+                </Button>
+                <Button variant="danger" onPress={() => { onReset(); setShowResetConfirm(false); }}>
+                  リセット
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      )}
     </>
   );
 }
@@ -828,9 +810,6 @@ function KeybindingsSection({
   const updateBinding = (id: string, combo: string) => {
     onChange(bindings.map((b) => (b.id === id ? { ...b, combo } : b)));
   };
-  const toggleBinding = (id: string) => {
-    onChange(bindings.map((b) => (b.id === id ? { ...b, enabled: !b.enabled } : b)));
-  };
   const removeBinding = (id: string) => {
     onChange(bindings.filter((b) => b.id !== id));
   };
@@ -872,20 +851,12 @@ function KeybindingsSection({
 
             return rows.map((binding) => (
               <div key={binding.id} className="flex items-center gap-3 px-4 py-3">
-                <div
-                  className={`flex size-9 shrink-0 items-center justify-center rounded-full ${
-                    binding.enabled ? "bg-accent text-accent-foreground" : "bg-surface-secondary text-muted"
-                  }`}
-                >
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
                   <Icon className="size-[18px]" />
                 </div>
                 <span className="text-sm font-medium text-foreground">{ACTION_ROW_LABELS[action]}</span>
                 <div className="ml-auto flex items-center gap-2.5">
-                  <span
-                    className={`inline-flex items-center rounded-lg bg-surface-secondary px-2.5 py-1 text-sm font-medium text-foreground ${
-                      binding.enabled ? "" : "opacity-50"
-                    }`}
-                  >
+                  <span className="inline-flex items-center rounded-lg bg-surface-secondary px-2.5 py-1 text-sm font-medium text-foreground">
                     {comboToVerboseLabel(binding.combo)}
                   </span>
                   {detectImeConflict(binding.combo) && (
@@ -903,19 +874,6 @@ function KeybindingsSection({
                     >
                       <IconPencil className="size-4" />
                     </Button>
-                    <Switch
-                      isSelected={binding.enabled}
-                      onChange={() => toggleBinding(binding.id)}
-                      aria-label="有効・無効を切り替え"
-                      size="sm"
-                      className="mx-0.5"
-                    >
-                      <Switch.Content>
-                        <Switch.Control>
-                          <Switch.Thumb />
-                        </Switch.Control>
-                      </Switch.Content>
-                    </Switch>
                     <Button
                       isIconOnly
                       size="sm"
@@ -1224,19 +1182,13 @@ function ModelsPane({
   return (
     <>
       <p className="mb-5 text-xs leading-relaxed text-muted">
-        OpenAI 公式 / 社内エンドポイント / ローカル LLM など OpenAI 互換 API に対応しています。
+        OpenAI 公式 / 社内エンドポイント / ローカルなど OpenAI 互換 API に対応しています。
       </p>
 
       <ProviderSection
         label="STT (音声認識)"
         config={settings.stt}
         onChange={(stt) => onChange({ ...settings, stt })}
-      />
-
-      <ProviderSection
-        label="LLM (辞書補正)"
-        config={settings.llm}
-        onChange={(llm) => onChange({ ...settings, llm })}
       />
     </>
   );
@@ -1245,8 +1197,12 @@ function ModelsPane({
 // --------------- Dictionary ---------------
 
 function DictionaryPane({
-  dict, onChange,
-}: { dict: Dictionary; onChange: (d: Dictionary) => void }) {
+  dict, onChange, flash,
+}: {
+  dict: Dictionary;
+  onChange: (d: Dictionary) => void;
+  flash: (type: "saved" | "error", text: string) => void;
+}) {
   const add = () => onChange({ entries: [...dict.entries, { from: "", to: "" }] });
   const remove = (i: number) =>
     onChange({ entries: dict.entries.filter((_, idx) => idx !== i) });
@@ -1257,10 +1213,39 @@ function DictionaryPane({
       ),
     });
 
+  const handleImport = async () => {
+    try {
+      const result = await openFileDialog({
+        multiple: false,
+        filters: [{ name: "辞書ファイル (CSV / Dragon TXT)", extensions: ["csv", "txt"] }],
+      });
+      if (!result || Array.isArray(result)) return; // キャンセル
+      const merged = await importDictionary(result);
+      onChange(merged);
+      flash("saved", `${merged.entries.length} 件をインポートしました ✓`);
+    } catch (e) {
+      flash("error", String(e));
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const result = await saveFileDialog({
+        defaultPath: "coatype-dictionary.csv",
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!result) return; // キャンセル
+      await exportDictionary(result);
+      flash("saved", "辞書を CSV にエクスポートしました ✓");
+    } catch (e) {
+      flash("error", String(e));
+    }
+  };
+
   return (
     <>
       <p className="mb-5 text-xs leading-relaxed text-muted">
-        文字起こし結果に対して完全一致で置換します。LLM補正をONにすると文脈も考慮します。
+        文字起こし結果に対して辞書で置換します。CSV (RFC 4180) または Dragon TXT 形式でインポートできます。
       </p>
 
       <Panel className="overflow-hidden">
@@ -1271,7 +1256,7 @@ function DictionaryPane({
         </div>
         {dict.entries.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-muted">
-            エントリがありません。「+ 追加」で登録してください。
+            エントリがありません。「+ 追加」またはファイルからインポートしてください。
           </div>
         ) : (
           <div className="divide-y divide-separator">
@@ -1309,10 +1294,22 @@ function DictionaryPane({
         )}
       </Panel>
 
-      <div className="mt-4 flex justify-start">
+      <div className="mt-4 flex flex-wrap justify-start gap-2">
         <Button variant="secondary" onPress={add}>
           <IconPlus className="size-4" />
           追加
+        </Button>
+        <Button variant="secondary" onPress={handleImport}>
+          <IconUpload className="size-4" />
+          インポート
+        </Button>
+        <Button
+          variant="secondary"
+          onPress={handleExport}
+          isDisabled={dict.entries.length === 0}
+        >
+          <IconDownload className="size-4" />
+          エクスポート
         </Button>
       </div>
     </>
@@ -1384,19 +1381,15 @@ function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => 
 // --------------- API Key ---------------
 
 function ApiKeyPane({
-  separateKeys,
-  commonKey, sttKey, llmKey,
-  keyExists, sttKeyExists, llmKeyExists,
-  onCommonKeyChange, onSttKeyChange, onLlmKeyChange,
+  apiKey,
+  keyExists,
+  onApiKeyChange,
   onSave,
 }: {
-  separateKeys: boolean;
-  commonKey: string; sttKey: string; llmKey: string;
-  keyExists: boolean; sttKeyExists: boolean; llmKeyExists: boolean;
-  onCommonKeyChange: (k: string) => void;
-  onSttKeyChange: (k: string) => void;
-  onLlmKeyChange: (k: string) => void;
-  onSave: (provider: "stt" | "llm" | "common", key: string) => void;
+  apiKey: string;
+  keyExists: boolean;
+  onApiKeyChange: (k: string) => void;
+  onSave: (key: string) => void;
 }) {
   const savedAlert = (text: string) => (
     <Alert status="success" className="w-full">
@@ -1409,82 +1402,32 @@ function ApiKeyPane({
 
   return (
     <>
-      {!separateKeys ? (
-        <Section title="共通 API キー">
-          <div className="flex flex-col gap-3">
-            {keyExists && savedAlert("APIキーは macOS Keychain に保存済みです")}
-            <Panel className="p-4">
-              <TextField
-                aria-label="共通 API キー"
-                type="password"
-                className="w-full"
-                value={commonKey}
-                onChange={onCommonKeyChange}
-              >
-                <Input placeholder={keyExists ? "新しいキーで上書きする場合に入力…" : "sk-…"} />
-              </TextField>
-            </Panel>
-            <div className="flex justify-end">
-              <Button onPress={() => onSave("common", commonKey)} isDisabled={!commonKey.trim()}>
-                キーを保存
-              </Button>
-            </div>
+      <Section title="API キー">
+        <div className="flex flex-col gap-3">
+          {keyExists && savedAlert("APIキーは macOS Keychain に保存済みです")}
+          <Panel className="p-4">
+            <TextField
+              aria-label="API キー"
+              type="password"
+              className="w-full"
+              value={apiKey}
+              onChange={onApiKeyChange}
+            >
+              <Input placeholder={keyExists ? "新しいキーで上書きする場合に入力…" : "sk-…"} />
+            </TextField>
+          </Panel>
+          <div className="flex justify-end">
+            <Button onPress={() => onSave(apiKey)} isDisabled={!apiKey.trim()}>
+              キーを保存
+            </Button>
           </div>
-        </Section>
-      ) : (
-        <>
-          <Section title="STT (音声認識) キー">
-            <div className="flex flex-col gap-3">
-              {sttKeyExists && savedAlert("STT キーが Keychain に保存済み")}
-              <Panel className="p-4">
-                <TextField
-                  aria-label="STT API キー"
-                  type="password"
-                  className="w-full"
-                  value={sttKey}
-                  onChange={onSttKeyChange}
-                >
-                  <Input placeholder={sttKeyExists ? "上書きする場合に入力…" : "sk-…"} />
-                </TextField>
-              </Panel>
-              <div className="flex justify-end">
-                <Button onPress={() => onSave("stt", sttKey)} isDisabled={!sttKey.trim()}>
-                  STT キーを保存
-                </Button>
-              </div>
-            </div>
-          </Section>
-
-          <Section title="LLM (辞書補正) キー">
-            <div className="flex flex-col gap-3">
-              {llmKeyExists && savedAlert("LLM キーが Keychain に保存済み")}
-              <Panel className="p-4">
-                <TextField
-                  aria-label="LLM API キー"
-                  type="password"
-                  className="w-full"
-                  value={llmKey}
-                  onChange={onLlmKeyChange}
-                >
-                  <Input placeholder={llmKeyExists ? "上書きする場合に入力…" : "sk-…"} />
-                </TextField>
-              </Panel>
-              <div className="flex justify-end">
-                <Button onPress={() => onSave("llm", llmKey)} isDisabled={!llmKey.trim()}>
-                  LLM キーを保存
-                </Button>
-              </div>
-            </div>
-          </Section>
-        </>
-      )}
+        </div>
+      </Section>
 
       <Card variant="default" className="w-full">
         <p className="text-xs leading-relaxed text-muted">
           キーは macOS Keychain (<code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">jp.co.cotapon.coatype</code>) に保存されます。<br />
-          環境変数 <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">COATYPE_API_KEY</code> が設定されている場合はそちらが優先されます。<br />
-          STT/LLM を個別に設定する場合は <strong>モデル設定</strong> の
-          <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">separate_api_keys</code> を有効化してください（設定ファイルで直接指定可能）。
+          環境変数 <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">COATYPE_API_KEY</code> が設定されている場合はそちらが優先されます。
         </p>
       </Card>
     </>

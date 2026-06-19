@@ -2,7 +2,7 @@ use crate::config::settings::{KeyBinding, Settings};
 use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryItem;
 use crate::pipeline::Pipeline;
-use crate::secrets::keychain::{self, ACCOUNT_COMMON, ACCOUNT_LLM, ACCOUNT_STT};
+use crate::secrets::keychain;
 use crate::shortcut::listener::{parse_shortcut, RegisteredBinding};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -41,18 +41,9 @@ pub async fn save_settings(
     let p: &Pipeline = &**pipeline;
     *p.translate.lock().unwrap() = settings.translate_mode;
     *p.language.lock().unwrap() = settings.language.clone();
-    *p.llm_correct.lock().unwrap() = settings.llm_correct;
 
-    let stt_key = keychain::resolve_api_key_for(
-        if settings.separate_api_keys { ACCOUNT_STT } else { ACCOUNT_COMMON },
-    )
-    .unwrap_or_default();
-    let llm_key = keychain::resolve_api_key_for(
-        if settings.separate_api_keys { ACCOUNT_LLM } else { ACCOUNT_COMMON },
-    )
-    .unwrap_or_default();
+    let stt_key = keychain::resolve_api_key().unwrap_or_default();
     p.rebuild_stt_client(&settings.stt, stt_key);
-    p.rebuild_llm_client(&settings.llm, llm_key);
 
     // キーバインドをホットリロード (リスナー再起動なし)
     let new_registered = bindings_to_registered(&settings.bindings);
@@ -82,6 +73,38 @@ pub async fn save_dictionary(
 }
 
 #[tauri::command]
+pub async fn import_dictionary(
+    path: String,
+    pipeline: State<'_, Arc<Pipeline>>,
+    dict_path: State<'_, DictPath>,
+) -> Result<Dictionary, String> {
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let incoming =
+        crate::dictionary::io::detect_and_parse(&content).map_err(|e| e.to_string())?;
+
+    let p: &Pipeline = &**pipeline;
+    let mut dict = p.dict.lock().unwrap().clone();
+    dict.merge(incoming);
+
+    dict.save(&dict_path.0).map_err(|e| e.to_string())?;
+    *p.dict.lock().unwrap() = dict.clone();
+
+    Ok(dict)
+}
+
+#[tauri::command]
+pub async fn export_dictionary(
+    path: String,
+    pipeline: State<'_, Arc<Pipeline>>,
+) -> Result<(), String> {
+    let p: &Pipeline = &**pipeline;
+    let dict = p.dict.lock().unwrap().clone();
+    let csv = crate::dictionary::io::to_csv(&dict).map_err(|e| e.to_string())?;
+    std::fs::write(&path, csv).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn list_history(
     pipeline: State<'_, Arc<Pipeline>>,
     limit: i64,
@@ -96,35 +119,19 @@ pub async fn clear_history(pipeline: State<'_, Arc<Pipeline>>) -> Result<(), Str
     p.history.clear().map_err(|e| e.to_string())
 }
 
-/// provider: "stt" | "llm" | "common" (デフォルト: common)
 #[tauri::command]
 pub async fn save_api_key(
-    provider: String,
     key: String,
     pipeline: State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
-    let account = provider_to_account(&provider);
-    keychain::save_api_key_for(account, &key).map_err(|e| e.to_string())?;
-    match provider.as_str() {
-        "stt" => pipeline.update_stt_api_key(key),
-        "llm" => pipeline.update_llm_api_key(key),
-        _ => pipeline.update_api_key(key),
-    }
+    keychain::save_api_key(&key).map_err(|e| e.to_string())?;
+    pipeline.update_api_key(key);
     Ok(())
 }
 
-/// provider: "stt" | "llm" | "common" (デフォルト: common)
 #[tauri::command]
-pub async fn has_api_key(provider: String) -> bool {
-    keychain::has_api_key_for(provider_to_account(&provider))
-}
-
-fn provider_to_account(provider: &str) -> &'static str {
-    match provider {
-        "stt" => ACCOUNT_STT,
-        "llm" => ACCOUNT_LLM,
-        _ => ACCOUNT_COMMON,
-    }
+pub async fn has_api_key() -> bool {
+    keychain::resolve_api_key().is_ok()
 }
 
 #[tauri::command]

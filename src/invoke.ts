@@ -7,16 +7,17 @@ export const saveSettings = (settings: Settings) =>
 export const getDictionary = () => invoke<Dictionary>("get_dictionary");
 export const saveDictionary = (dict: Dictionary) =>
   invoke<void>("save_dictionary", { dict });
+export const importDictionary = (path: string) =>
+  invoke<Dictionary>("import_dictionary", { path });
+export const exportDictionary = (path: string) =>
+  invoke<void>("export_dictionary", { path });
 export const listHistory = (limit: number) =>
   invoke<HistoryItem[]>("list_history", { limit });
 export const clearHistory = () => invoke<void>("clear_history");
 
-type ApiKeyProvider = "stt" | "llm" | "common";
-
-export const saveApiKey = (key: string, provider: ApiKeyProvider = "common") =>
-  invoke<void>("save_api_key", { provider, key });
-export const hasApiKey = (provider: ApiKeyProvider = "common") =>
-  invoke<boolean>("has_api_key", { provider });
+export const saveApiKey = (key: string) =>
+  invoke<void>("save_api_key", { key });
+export const hasApiKey = () => invoke<boolean>("has_api_key");
 
 export const checkAccessibility = () => invoke<boolean>("check_accessibility");
 export const openAccessibilitySettings = () =>
