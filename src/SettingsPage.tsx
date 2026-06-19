@@ -585,6 +585,8 @@ function GeneralPane({
         </Panel>
       </Section>
 
+      <p className="mt-2 text-center text-[11px] text-muted/50">© 2025 cotapon</p>
+
       {showResetConfirm && (
         <Modal.Backdrop
           variant="blur"
