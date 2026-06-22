@@ -76,12 +76,12 @@ mod tests {
     fn replaces_entries_in_order() {
         let dict = Dictionary {
             entries: vec![
-                Entry { from: "さいば".into(), to: "CyberAgent".into() },
-                Entry { from: "あい えーじぇんと".into(), to: "AI Agent".into() },
+                Entry { from: "おーぷんえーあい".into(), to: "OpenAI".into() },
+                Entry { from: "りらいとする".into(), to: "rewrite".into() },
             ],
         };
-        let out = dict.apply("さいばはあい えーじぇんとを推進する");
-        assert_eq!(out, "CyberAgentはAI Agentを推進する");
+        let out = dict.apply("おーぷんえーあいはりらいとするのが得意だ");
+        assert_eq!(out, "OpenAIはrewriteのが得意だ");
     }
 
     #[test]

@@ -105,7 +105,7 @@ impl Default for Settings {
             translate_model: None,
             stt: ProviderConfig {
                 base_url: base,
-                model: "whisper-large-v3".into(),
+                model: String::new(),
                 auth_kind: AuthKind::Bearer,
             },
             show_overlay: true,
@@ -118,7 +118,7 @@ impl Default for Settings {
 
 impl Settings {
     fn default_base() -> String {
-        "https://genai.mlplatform.apis.platform.cycloud.jp".to_string()
+        String::new()
     }
 
     fn migrate_legacy(&mut self) {
@@ -132,9 +132,6 @@ impl Settings {
         }
         if self.stt.base_url.is_empty() {
             self.stt.base_url = base;
-        }
-        if self.stt.model.is_empty() {
-            self.stt.model = "whisper-large-v3".into();
         }
 
         // 削除されたアクション (paste_last 等) を持つバインドを除去
@@ -215,7 +212,7 @@ mod tests {
         assert_eq!(s.bindings.len(), 1);
         assert_eq!(s.bindings[0].combo, "rightoption");
         assert!(matches!(s.bindings[0].action, ActionKind::StartRecord));
-        assert_eq!(s.stt.model, "whisper-large-v3");
+        assert_eq!(s.stt.model, "");
     }
 
     #[test]
@@ -287,7 +284,7 @@ mod tests {
         let mut s: Settings = serde_json::from_str(json).unwrap();
         s.migrate_legacy();
         assert_eq!(s.stt.base_url, "https://custom.endpoint.example");
-        assert_eq!(s.stt.model, "whisper-large-v3");
+        assert_eq!(s.stt.model, "");
         assert!(s.legacy_api_base.is_none());
     }
 
