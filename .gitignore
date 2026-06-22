@@ -33,3 +33,7 @@ target/
 
 # Tauri
 src-tauri/gen/
+
+# Claude Code
+.claude/settings.local.json
+.claude/worktrees/
