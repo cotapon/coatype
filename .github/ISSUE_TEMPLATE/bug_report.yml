@@ -1,0 +1,59 @@
+name: バグ報告
+description: 不具合を報告する
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。再現に必要な情報をできるだけ詳しく記入してください。
+        セキュリティに関わる問題は、このフォームではなく SECURITY.md の手順で報告してください。
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 何が起きたか
+      description: 期待した動作と、実際に起きた動作を書いてください。
+      placeholder: 例）ショートカットを押しても録音が始まらない
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 問題を再現する手順を順番に書いてください。
+      placeholder: |
+        1. アプリを起動
+        2. Right Command を長押し
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS バージョン
+      placeholder: 例）macOS 14.5 / macOS 26.0
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: CoAType バージョン
+      placeholder: 例）1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ・スクリーンショット（任意）
+      description: |
+        `RUST_LOG=debug npm run tauri dev` のログや、エラー画面のスクショがあれば貼ってください。
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 確認事項
+      options:
+        - label: 既存の Issue に同じ報告がないことを確認した
+          required: true
+        - label: アクセシビリティ権限を付与済みである（ショートカット関連の場合）
+          required: false

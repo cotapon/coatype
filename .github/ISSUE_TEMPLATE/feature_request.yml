@@ -1,0 +1,36 @@
+name: 機能要望
+description: 新機能や改善を提案する
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提案ありがとうございます。
+        CoAType は個人メンテナンスのため、すべての要望に対応できるとは限らない点をご了承ください。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい課題
+      description: どんな場面で困っているか、なぜこの機能が欲しいかを書いてください。
+      placeholder: 例）録音中に入力先のアプリを切り替えると挿入先がずれる
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案する解決策
+      description: どう動いてほしいかを書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 代替案・検討したこと（任意）
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 確認事項
+      options:
+        - label: 既存の Issue に同じ要望がないことを確認した
+          required: true

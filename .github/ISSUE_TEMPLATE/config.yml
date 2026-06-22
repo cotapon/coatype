@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 質問・相談
+    url: https://github.com/cotapon/coatype/discussions
+    about: 使い方の質問やアイデアの相談は Discussions へお願いします（有効な場合）。
+  - name: セキュリティ報告
+    url: https://github.com/cotapon/coatype/security/policy
+    about: 脆弱性の報告は公開 Issue ではなく SECURITY.md の手順で行ってください。
