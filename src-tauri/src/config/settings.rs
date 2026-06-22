@@ -118,7 +118,7 @@ impl Default for Settings {
 
 impl Settings {
     fn default_base() -> String {
-        "https://genai.mlplatform.apis.platform.cycloud.jp".to_string()
+        String::new()
     }
 
     fn migrate_legacy(&mut self) {
