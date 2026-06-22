@@ -228,6 +228,32 @@ Keychain に保存後、アプリを再起動せずにすぐ使えます (in-mem
 
 → クリップボード経由 (Cmd+V) を使用しています。入力先のアプリがペーストを受け付けることを確認してください
 
+### Dock / Cmd+Tab のアイコンが更新されない
+
+macOS の Dock と Cmd+Tab は、ビルドされたアプリ bundle 内の `Contents/Resources/icon.icns` を表示します。
+このリポジトリでは元ファイルは `src-tauri/icons/icon.icns` です。
+
+Tauri dev では、アイコンだけを変更しても Cargo が既存の `target/debug/coatype` を再利用し、古いアイコンが表示され続けることがあります。
+その場合は、古い dev プロセスを止めてから CoAType のビルド成果物を消し、再起動してください。
+
+```bash
+# Vite dev server が残っている場合だけ実行
+lsof -ti tcp:1420 | xargs kill
+
+# CoAType の Rust/Tauri ビルド成果物を削除して、次回起動時に再ビルドさせる
+cargo clean -p coatype --manifest-path src-tauri/Cargo.toml
+
+# 開発アプリを再起動
+npm run dev:tauri
+```
+
+`cargo clean` は macOS の Dock/IconServices キャッシュを直接削除するコマンドではありません。
+再ビルド後も表示が古い場合は、Dock を再起動して表示キャッシュを読み直してください。
+
+```bash
+killall Dock
+```
+
 ### API エラー
 
 → `COATYPE_API_KEY` または Keychain のキーが正しいか確認。設定した API エンドポイントに到達できるネットワーク環境か確認。
