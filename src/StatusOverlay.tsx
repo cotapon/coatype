@@ -6,7 +6,8 @@ import "./overlay.css";
 type RecordingState = "started" | "processing" | "idle";
 
 const WAVE_WIDTH = 132;
-const WAVE_HEIGHT = 26;
+// processing 状態の Spinner(sm) = size-4 = 16px に高さを合わせ、状態遷移時のピルの高さ変化をなくす。
+const WAVE_HEIGHT = 16;
 
 // ノイズゲート: この RMS 以下は環境音とみなし波形を平らにする (実測: 無音 ≈ 0.003)。
 const NOISE_FLOOR = 0.01;
