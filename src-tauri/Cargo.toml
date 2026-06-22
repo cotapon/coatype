@@ -2,7 +2,8 @@
 name = "coatype"
 version = "1.0.0"
 description = "CoAType - Voice Typing for cotapon"
-authors = ["you"]
+authors = ["cotapon"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
