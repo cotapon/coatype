@@ -1211,7 +1211,7 @@ function ProviderSection({
             value={config.model}
             onChange={(v) => set({ model: v })}
           >
-            <Input />
+            <Input placeholder="例: whisper-1" />
           </TextField>
         </FieldRow>
 
