@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Universal binary をビルドして DMG パスを出力する。
-# 配布はこのスクリプトの出力 DMG を社内ストレージに手動で上げる。
+# 配布はこのスクリプトの出力 DMG をリリース配布先に手動でアップロードする。
 #
 # 使い方:
 #   ./scripts/release.sh
@@ -37,5 +37,5 @@ echo "=== Build complete ==="
 echo "DMG: $DMG_PATH"
 echo "size: $(du -h "$DMG_PATH" | cut -f1)"
 echo ""
-echo "Next: 上記 DMG を社内ストレージ (Google Drive / Slack 等) にアップロードして配布リンクを共有してください。"
+echo "Next: 上記 DMG をリリース配布先にアップロードして配布リンクを共有してください。"
 echo "      インストール手順は README.md の「インストール手順」セクションを参照してください。"

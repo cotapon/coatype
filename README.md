@@ -66,7 +66,7 @@ npm install
 **方法1: 環境変数 (開発時推奨)**
 
 ```bash
-export COATYPE_API_KEY=mlp-your-key-here
+export COATYPE_API_KEY=your-api-key-here
 ```
 
 **方法2: 設定画面から保存 (Keychain)**
@@ -257,3 +257,9 @@ killall Dock
 ### API エラー
 
 → `COATYPE_API_KEY` または Keychain のキーが正しいか確認。設定した API エンドポイントに到達できるネットワーク環境か確認。
+
+---
+
+## License
+
+[MIT](LICENSE) © cotapon

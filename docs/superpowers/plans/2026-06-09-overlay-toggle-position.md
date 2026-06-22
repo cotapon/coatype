@@ -528,7 +528,7 @@ git commit -m "feat(main): ShowOverlay 管理と show_overlay_panel の位置計
 - [ ] **Step 2: TypeScript の型チェックを通す**
 
 ```bash
-cd /Users/a14161/cotapon/coatype && npx tsc --noEmit 2>&1 | head -20
+npx tsc --noEmit 2>&1 | head -20
 ```
 
 期待出力: (空 — エラーなし)

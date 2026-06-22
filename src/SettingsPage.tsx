@@ -1266,7 +1266,7 @@ function ModelsPane({
   return (
     <>
       <p className="mb-5 text-xs leading-relaxed text-muted">
-        OpenAI 公式 / 社内エンドポイント / ローカルなど OpenAI 互換 API に対応しています。
+        OpenAI 公式 / カスタムエンドポイント / ローカルなど OpenAI 互換 API に対応しています。
       </p>
 
       <ProviderSection
