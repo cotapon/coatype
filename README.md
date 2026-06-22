@@ -9,7 +9,7 @@
 ## 機能
 
 - **Push-to-Talk / Toggle** — ショートカットキー長押しまたはトグルで録音
-- **whisper-large-v3** — cotapon MLプラットフォームのWhisper APIによる高精度文字起こし
+- **whisper-large-v3** — Whisper API による高精度文字起こし
 - **英語翻訳モード** — `/v1/audio/translations` エンドポイントで日本語→英語翻訳
 - **カスタム辞書** — 完全一致文字列置換（常時）＋オプションLLM補正
 - **テキスト挿入** — クリップボード経由（Cmd+V）で日本語・絵文字含む全文字に対応
@@ -136,16 +136,19 @@ security find-generic-password -s "jp.co.cotapon.coatype" -w
 
 ---
 
-## 配布 (社内リリース手順)
+## 配布
 
 ### リリースビルド
 
+GitHub Actions の `release.yml` が自動的にリリースビルドを作成します。
+タグをプッシュするとワークフローが起動し、GitHub Releases に DMG が公開されます。
+
 ```bash
-./scripts/release.sh
+git tag v1.x.x
+git push origin v1.x.x
 ```
 
-Apple Silicon + Intel の universal binary DMG が生成されます。  
-出力された DMG を社内ストレージ (Google Drive / Slack 等) にアップロードして配布リンクを共有してください。
+自動アップデート機能 (Tauri Updater) が有効なため、既存ユーザーには自動的に更新が通知されます。
 
 ### インストール手順 (受け取り手向け)
 
@@ -227,4 +230,4 @@ Keychain に保存後、アプリを再起動せずにすぐ使えます (in-mem
 
 ### API エラー
 
-→ `COATYPE_API_KEY` または Keychain のキーが正しいか確認。VPN/ネットワークがcotapon内部APIに到達できるか確認。
+→ `COATYPE_API_KEY` または Keychain のキーが正しいか確認。設定した API エンドポイントに到達できるネットワーク環境か確認。
