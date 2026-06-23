@@ -1,8 +1,8 @@
 # CoAType (コエタイプ)
 
-**Voice Typing for cotapon** — Powered by whisper-large-v3
+**Voice Typing for cotapon** — Powered by OpenAI-compatible Speech-to-Text
 
-音声を録音してWhisper APIで文字起こしし、アクティブなアプリケーションに直接テキストを入力するmacOSデスクトップアプリです。
+音声を録音してOpenAI互換の音声文字起こしAPIでテキスト化し、アクティブなアプリケーションに直接テキストを入力するmacOSデスクトップアプリです。
 
 > **サポート方針**: CoAType は個人がメンテナンスしているプロジェクトです。対応はベストエフォートで行っており、すべての Issue・機能要望に対応できるとは限りません。貢献方法は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
@@ -11,7 +11,7 @@
 ## 機能
 
 - **Push-to-Talk / Toggle** — ショートカットキー長押しまたはトグルで録音
-- **whisper-large-v3** — Whisper API による高精度文字起こし
+- **OpenAI互換 STT 対応** — OpenAI Whisper・Groq・ローカル Whisper サーバーなど、OpenAI互換の `/v1/audio/transcriptions` エンドポイントを持つ任意のサービスを利用可能
 - **英語翻訳モード** — `/v1/audio/translations` エンドポイントで日本語→英語翻訳
 - **カスタム辞書** — 完全一致文字列置換（常時）＋オプションLLM補正
 - **テキスト挿入** — クリップボード経由（Cmd+V）で日本語・絵文字含む全文字に対応
@@ -103,7 +103,7 @@ npm test
 RUST_LOG=debug npm run tauri dev
 ```
 
-`tracing` クレートのログがターミナルに出力されます。キーイベント受信・録音開始/終了・Whisper レスポンスなどが確認できます。
+`tracing` クレートのログがターミナルに出力されます。キーイベント受信・録音開始/終了・STT レスポンスなどが確認できます。
 
 特定クレートのみに絞りたい場合:
 
@@ -181,7 +181,18 @@ v2 以降で Apple Developer ID 証明書の取得・Notarization・Tauri Update
 | Trigger Mode | Push-to-Talk または Toggle |
 | Translate to English | 文字起こし結果を英語に翻訳 |
 | LLM Dictionary Correction | 辞書とLLMを使った文脈補正 (実験的) |
-| API Base URL | WhisperエンドポイントのベースURL |
+| API Base URL | STT エンドポイントのベース URL (OpenAI 互換) |
+| Model | 使用する STT モデル名 (例: `whisper-1`, `whisper-large-v3`) |
+| Auth | 認証方式。`Bearer`(OpenAI / Groq 等) / `APIキーヘッダー`(Azure 等) / `なし`(ローカルサーバー) |
+
+### STT エンドポイント設定例
+
+| サービス | API Base URL | Model | Auth |
+|---|---|---|---|
+| OpenAI | `https://api.openai.com` | `whisper-1` | Bearer |
+| Groq | `https://api.groq.com/openai` | `whisper-large-v3-turbo` | Bearer |
+| ローカル (whisper.cpp / faster-whisper 等) | `http://localhost:8080` | サーバー依存 | なし |
+| Azure OpenAI | `https://<resource>.openai.azure.com/openai/deployments/<deploy>` | (デプロイに含む) | APIキーヘッダー (`api-key`) |
 
 ---
 
