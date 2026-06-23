@@ -30,6 +30,12 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // AquaVoice 流: Dock / Cmd+Tab に出さない accessory app にする。
+            // LSUIElement(Info.plist)は cold-launch 用。これは実行時に確実に効かせる保険で、
+            // dev モードや LaunchServices キャッシュにも左右されない。
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let app_data = app.path().app_data_dir().expect("app data dir");
             std::fs::create_dir_all(&app_data)?;
 
