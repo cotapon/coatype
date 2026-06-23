@@ -2,6 +2,10 @@
 
 **Voice Typing for cotapon** — Powered by OpenAI-compatible Speech-to-Text
 
+[![GitHub release](https://img.shields.io/github/v/release/cotapon/coatype?label=最新版&color=brightgreen)](https://github.com/cotapon/coatype/releases/latest)
+
+**[→ 最新版をダウンロード (macOS)](https://github.com/cotapon/coatype/releases/latest)**
+
 音声を録音してOpenAI互換の音声文字起こしAPIでテキスト化し、アクティブなアプリケーションに直接テキストを入力するmacOSデスクトップアプリです。
 
 > **サポート方針**: CoAType は個人がメンテナンスしているプロジェクトです。対応はベストエフォートで行っており、すべての Issue・機能要望に対応できるとは限りません。貢献方法は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
