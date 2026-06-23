@@ -369,7 +369,10 @@ export function SettingsPage() {
     <div className="fixed inset-0 flex flex-col bg-background text-foreground">
       {banner && (
         <div className="fixed left-1/2 top-3 z-50 w-[min(420px,90vw)] -translate-x-1/2">
-          <Alert status={banner.type === "saved" ? "success" : "danger"} className="shadow-lg">
+          <Alert
+            status={banner.type === "saved" ? "success" : "danger"}
+            className={`shadow-2xl shadow-black/60 ring-1 ${banner.type === "saved" ? "ring-success/60" : "ring-danger/60"}`}
+          >
             <Alert.Indicator />
             <Alert.Content>
               <Alert.Title>{banner.text}</Alert.Title>
@@ -482,7 +485,7 @@ function GeneralPane({
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "latest" | "error">("idle");
 
-  const handleCheckUpdate = async () => {
+  const handleCheckUpdate = async (silent = false) => {
     setUpdateChecking(true);
     setUpdateStatus("idle");
     setUpdateAvailable(null);
@@ -494,7 +497,7 @@ function GeneralPane({
         setUpdateStatus("latest");
       }
     } catch (e) {
-      onError(`アップデートチェック失敗: ${e}`);
+      if (!silent) onError(`アップデートチェック失敗: ${e}`);
       setUpdateStatus("error");
     } finally {
       setUpdateChecking(false);
@@ -512,6 +515,12 @@ function GeneralPane({
       setUpdateInstalling(false);
     }
   };
+
+  // 設定画面を開いたタイミングで自動チェック（失敗はサイレント）
+  useEffect(() => {
+    handleCheckUpdate(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const langOption = LANGUAGES.find((l) => l.code === settings.language);
   const langLabel = langOption ? `${langOption.label} (${langOption.code})` : settings.language;
@@ -645,7 +654,7 @@ function GeneralPane({
               </p>
               <Button
                 variant="secondary"
-                onPress={handleCheckUpdate}
+                onPress={() => handleCheckUpdate()}
                 isDisabled={updateChecking}
                 className="shrink-0"
               >
