@@ -4,7 +4,7 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/cotapon/coatype?label=最新版&color=brightgreen)](https://github.com/cotapon/coatype/releases/latest)
 
-**[→ 最新版をダウンロード (macOS)](https://github.com/cotapon/coatype/releases/latest)**
+**[→ 最新版をダウンロード (macOS / Windows)](https://github.com/cotapon/coatype/releases/latest)**
 
 音声を録音してOpenAI互換の音声文字起こしAPIでテキスト化し、アクティブなアプリケーションに直接テキストを入力するmacOSデスクトップアプリです。
 
