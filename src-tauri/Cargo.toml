@@ -1,6 +1,6 @@
 [package]
 name = "coatype"
-version = "1.0.0"
+version = "1.0.1"
 description = "CoAType - Voice Typing for cotapon"
 authors = ["cotapon"]
 license = "MIT"
