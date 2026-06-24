@@ -168,6 +168,15 @@ pub async fn stop_test_recording(pipeline: State<'_, Arc<Pipeline>>) -> Result<S
         .map_err(|e| e.to_string())
 }
 
+/// 外部 URL をデフォルトブラウザで開く。
+#[tauri::command]
+pub async fn open_url(url: String) {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(&url).spawn().ok();
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd").args(["/c", "start", &url]).spawn().ok();
+}
+
 /// キーバインド設定中 (CaptureModal 表示中) はリスナーを一時停止する。
 #[tauri::command]
 pub async fn set_listener_paused(

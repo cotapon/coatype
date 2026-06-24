@@ -28,3 +28,5 @@ export const setListenerPaused = (paused: boolean) =>
 
 export const startTestRecording = () => invoke<void>("start_test_recording");
 export const stopTestRecording = () => invoke<string>("stop_test_recording");
+
+export const openUrl = (url: string) => invoke<void>("open_url", { url });

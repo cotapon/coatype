@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import {
   Alert,
@@ -39,6 +40,7 @@ import {
   activeShortcut,
   setListenerPaused,
   startTestRecording, stopTestRecording,
+  openUrl,
 } from "./invoke";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { checkForUpdate, downloadAndInstallUpdate } from "./updater";
@@ -266,6 +268,7 @@ export function SettingsPage() {
   const [accessibilityOk, setAccessibilityOk] = useState(true);
   const [listenerState, setListenerState] = useState<ActiveShortcut | null>(null);
   const [banner, setBanner] = useState<{ type: "saved" | "error"; text: string } | null>(null);
+  const [appVersion, setAppVersion] = useState("");
 
   const settingsLoaded = useRef(false);
   const dictLoaded = useRef(false);
@@ -288,6 +291,7 @@ export function SettingsPage() {
     refreshKeyStatus();
     checkAccessibility().then(setAccessibilityOk).catch(console.error);
     refreshListenerState();
+    getVersion().then(setAppVersion).catch(console.error);
 
     const ul1 = listen<string>("shortcut-error", (e) => {
       flash("error", `ショートカット初期化失敗: ${e.payload}`);
@@ -405,13 +409,21 @@ export function SettingsPage() {
             })}
           </div>
 
-          <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-white p-1">
-              <img src={logoUrl} alt="CoAType" className="size-full object-contain" />
-            </div>
-            <div className="min-w-0 leading-tight">
-              <div className="text-sm font-semibold text-foreground">CoAType</div>
-              <div className="text-xs text-muted">Version 1.0.0</div>
+          <div className="mt-auto px-1 pt-4">
+            <button
+              onClick={() => openUrl("https://github.com/cotapon/coatype/issues/new")}
+              className="mb-3 w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted hover:bg-muted/10 hover:text-foreground transition-colors text-left"
+            >
+              フィードバックを送る…
+            </button>
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-white p-1">
+                <img src={logoUrl} alt="CoAType" className="size-full object-contain" />
+              </div>
+              <div className="min-w-0 leading-tight">
+                <div className="text-sm font-semibold text-foreground">CoAType</div>
+                <div className="text-xs text-muted">{appVersion ? `Version ${appVersion}` : "—"}</div>
+              </div>
             </div>
           </div>
         </nav>

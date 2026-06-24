@@ -98,7 +98,9 @@ fn main() {
             let quit = MenuItem::with_id(app, "quit", "Quit CoAType", true, None::<&str>)?;
             let settings_item =
                 MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&settings_item, &quit])?;
+            let feedback_item =
+                MenuItem::with_id(app, "feedback", "Send Feedback…", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&settings_item, &feedback_item, &quit])?;
             let _tray = TrayIconBuilder::new()
                 .icon(tauri::include_image!("icons/tray-icon.png"))
                 .menu(&menu)
@@ -109,6 +111,12 @@ fn main() {
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
+                    }
+                    "feedback" => {
+                        std::process::Command::new("open")
+                            .arg("https://github.com/cotapon/coatype/issues/new")
+                            .spawn()
+                            .ok();
                     }
                     _ => {}
                 })
@@ -239,6 +247,7 @@ fn main() {
             coatype_lib::commands::set_listener_paused,
             coatype_lib::commands::start_test_recording,
             coatype_lib::commands::stop_test_recording,
+            coatype_lib::commands::open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CoAType");
