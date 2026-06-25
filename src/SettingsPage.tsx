@@ -357,6 +357,16 @@ export function SettingsPage() {
     catch (e) { flash("error", String(e)); }
   };
 
+  const handleRegisterDictEntry = (from: string, to: string) => {
+    const isUpdate = dict.entries.some((e) => e.from === from);
+    setDict({
+      entries: isUpdate
+        ? dict.entries.map((e) => (e.from === from ? { ...e, to } : e))
+        : [...dict.entries, { from, to }],
+    });
+    flash("saved", isUpdate ? "辞書を上書きしました ✓" : "辞書に登録しました ✓");
+  };
+
   const handleReset = () => {
     if (initialSettings) setSettings(initialSettings);
   };
@@ -412,9 +422,12 @@ export function SettingsPage() {
           <div className="mt-auto px-1 pt-4">
             <button
               onClick={() => openUrl("https://github.com/cotapon/coatype/issues/new")}
-              className="mb-3 w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted hover:bg-muted/10 hover:text-foreground transition-colors text-left"
+              className="mb-3 w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted hover:bg-muted/10 hover:text-foreground transition-colors text-left flex items-center gap-2"
             >
-              フィードバックを送る…
+              <svg viewBox="0 0 16 16" className="size-3.5 shrink-0 fill-current" aria-hidden>
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+              </svg>
+              フィードバックを送る
             </button>
             <div className="flex items-center gap-2.5">
               <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-white p-1">
@@ -463,7 +476,12 @@ export function SettingsPage() {
                   <DictionaryPane dict={dict} onChange={setDict} flash={flash} />
                 )}
                 {pane === "history" && (
-                  <HistoryPane items={history} onClear={handleClearHistory} />
+                  <HistoryPane
+                    items={history}
+                    onClear={handleClearHistory}
+                    dict={dict}
+                    onRegister={handleRegisterDictEntry}
+                  />
                 )}
               </div>
             </div>
@@ -1423,8 +1441,197 @@ function DictionaryPane({
 
 // --------------- History ---------------
 
-function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => void }) {
+type SelectionInfo = { text: string; rect: DOMRect; historyId: number };
+
+function useTextSelection() {
+  const [selection, setSelection] = useState<SelectionInfo | null>(null);
+  const selectionRef = useRef<SelectionInfo | null>(null);
+
+  const update = (info: SelectionInfo | null) => {
+    selectionRef.current = info;
+    setSelection(info);
+  };
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const sel = window.getSelection();
+      // 有効な選択(単一アイテム内・非空)のみ更新する。
+      // 空/コラプス/アイテム跨ぎでは即 null 化しない ─ mousedown ベースのクリアに委ねる。
+      if (!sel || sel.isCollapsed || !sel.toString().trim()) return;
+      const anchor = sel.anchorNode;
+      const focus = sel.focusNode;
+      const anchorEl = (anchor instanceof Element ? anchor : anchor?.parentElement)
+        ?.closest("[data-history-id]");
+      const focusEl = (focus instanceof Element ? focus : focus?.parentElement)
+        ?.closest("[data-history-id]");
+      if (!anchorEl || !focusEl || anchorEl !== focusEl) return;
+      const historyId = Number(anchorEl.getAttribute("data-history-id"));
+      if (!historyId) return;
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      update({ text: sel.toString().trim(), rect, historyId });
+    };
+
+    // capture phase で「機能外のクリック」だけを即クリア。
+    // [data-history-id](履歴テキスト)・[data-dict-ui](ボタン/ポップオーバー)内は保持。
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (!target?.closest("[data-history-id],[data-dict-ui]")) {
+        update(null);
+      }
+    };
+
+    const handleScroll = () => update(null);
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    document.addEventListener("mousedown", handleMouseDown, { capture: true });
+    window.addEventListener("scroll", handleScroll, { capture: true });
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+      document.removeEventListener("mousedown", handleMouseDown, { capture: true });
+      window.removeEventListener("scroll", handleScroll, { capture: true });
+    };
+  }, []);
+
+  const clearSelection = () => update(null);
+
+  return { selection, selectionRef, clearSelection };
+}
+
+function DictRegisterPopover({
+  selectionText,
+  rect,
+  existingTo,
+  onSubmit,
+  onClose,
+}: {
+  selectionText: string;
+  rect: DOMRect;
+  existingTo?: string;
+  onSubmit: (from: string, to: string) => void;
+  onClose: () => void;
+}) {
+  const [from, setFrom] = useState(selectionText);
+  const [to, setTo] = useState("");
+  const [mode, setMode] = useState<"input" | "confirm">("input");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const POPOVER_W = 284;
+  const POPOVER_H = 168;
+  const left = Math.min(Math.max(rect.left, 8), window.innerWidth - POPOVER_W - 8);
+  const top = rect.top > POPOVER_H + 8
+    ? rect.top - POPOVER_H - 8
+    : rect.bottom + 8;
+
+  useEffect(() => {
+    // rAF 遅延で登録し、開いた直後の同一 mousedown で誤って閉じるのを防ぐ
+    let removeListener: (() => void) | null = null;
+    const rafId = requestAnimationFrame(() => {
+      const onMouseDown = (e: MouseEvent) => {
+        if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      };
+      document.addEventListener("mousedown", onMouseDown);
+      removeListener = () => document.removeEventListener("mousedown", onMouseDown);
+    });
+    return () => {
+      cancelAnimationFrame(rafId);
+      removeListener?.();
+    };
+  }, [onClose]);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { e.preventDefault(); onClose(); }
+  };
+
+  const handleRegisterClick = () => {
+    if (existingTo !== undefined && mode === "input") {
+      setMode("confirm");
+    } else {
+      onSubmit(from.trim(), to.trim());
+    }
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      data-dict-ui=""
+      style={{ left, top, width: POPOVER_W }}
+      className="fixed z-40 rounded-xl border border-border bg-surface shadow-[var(--surface-shadow)] p-3"
+      onKeyDown={onKeyDown}
+    >
+      {mode === "input" ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+            <IconBook className="size-3.5 text-accent" />
+            辞書に登録
+          </div>
+          <TextField
+            aria-label="変換前"
+            className="w-full"
+            value={from}
+            onChange={setFrom}
+          >
+            <Input placeholder="変換前 (from)" />
+          </TextField>
+          <TextField
+            aria-label="変換後"
+            className="w-full"
+            value={to}
+            onChange={setTo}
+            autoFocus
+          >
+            <Input placeholder="変換後 (to)" />
+          </TextField>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="secondary" onPress={onClose}>
+              キャンセル
+            </Button>
+            <Button
+              size="sm"
+              onPress={handleRegisterClick}
+              isDisabled={!from.trim() || !to.trim()}
+            >
+              登録
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-semibold text-foreground">上書きの確認</div>
+          <p className="text-xs leading-relaxed text-muted">
+            「{from}」は既に「{existingTo}」として登録されています。「{to}」で上書きしますか?
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="secondary" onPress={() => setMode("input")}>
+              戻る
+            </Button>
+            <Button size="sm" variant="danger" onPress={() => onSubmit(from.trim(), to.trim())}>
+              上書き
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryPane({
+  items,
+  onClear,
+  dict,
+  onRegister,
+}: {
+  items: HistoryItem[];
+  onClear: () => void;
+  dict: Dictionary;
+  onRegister: (from: string, to: string) => void;
+}) {
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const { selection, selectionRef, clearSelection } = useTextSelection();
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [savedSelection, setSavedSelection] = useState<SelectionInfo | null>(null);
 
   const handleCopy = (id: number, text: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -1433,8 +1640,68 @@ function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => 
     });
   };
 
+  const handleDictButtonClick = () => {
+    // mousedown 時に selectionchange が先行して state が null になる場合があるため ref を優先
+    const current = selectionRef.current ?? selection;
+    if (!current) return;
+    setSavedSelection(current);
+    setPopoverOpen(true);
+  };
+
+  const handlePopoverClose = () => {
+    setPopoverOpen(false);
+    setSavedSelection(null);
+  };
+
+  const handlePopoverSubmit = (from: string, to: string) => {
+    onRegister(from, to);
+    setPopoverOpen(false);
+    setSavedSelection(null);
+    clearSelection();
+  };
+
+  const FLOAT_BTN_H = 32;
+
   return (
     <>
+      {/* 範囲選択時フローティングボタン */}
+      {selection && !popoverOpen && (
+        <button
+          style={{
+            position: "fixed",
+            top: Math.min(
+              Math.max(selection.rect.top - FLOAT_BTN_H - 4, 8),
+              window.innerHeight - FLOAT_BTN_H - 8
+            ),
+            left: Math.min(
+              Math.max(selection.rect.left, 8),
+              window.innerWidth - 148 - 8
+            ),
+            zIndex: 40,
+          }}
+          data-dict-ui=""
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-foreground shadow-[var(--surface-shadow)] hover:bg-surface-secondary transition-colors"
+          onMouseDown={(e) => {
+            e.preventDefault(); // フォーカス移動抑止
+            handleDictButtonClick();
+          }}
+        >
+          <IconBook className="size-3.5 text-accent" />
+          辞書に登録
+        </button>
+      )}
+
+      {/* 辞書登録ポップオーバー */}
+      {popoverOpen && savedSelection && (
+        <DictRegisterPopover
+          selectionText={savedSelection.text}
+          rect={savedSelection.rect}
+          existingTo={dict.entries.find((e) => e.from === savedSelection.text)?.to}
+          onSubmit={handlePopoverSubmit}
+          onClose={handlePopoverClose}
+        />
+      )}
+
       <div className="mb-4 flex w-full justify-end">
         <Button variant="danger" size="sm" onPress={onClear} isDisabled={items.length === 0}>
           全件削除
@@ -1450,7 +1717,12 @@ function HistoryPane({ items, onClear }: { items: HistoryItem[]; onClear: () => 
               <Card variant="secondary" className="w-full border border-separator">
                 <div className="flex items-end gap-2">
                   <div className="min-w-0 flex-1">
-                    <div className="leading-snug break-words text-foreground">{item.text}</div>
+                    <div
+                      className="leading-snug break-words text-foreground"
+                      data-history-id={item.id}
+                    >
+                      {item.text}
+                    </div>
                     <div className="mt-0.5 text-xs text-muted">
                       {item.created_at} · {item.language}
                       {item.translated ? " → 英語" : ""} · {item.duration_ms}ms
