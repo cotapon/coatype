@@ -9,17 +9,22 @@ const WAVE_WIDTH = 132;
 // processing 状態の Spinner(sm) = size-4 = 16px に高さを合わせ、状態遷移時のピルの高さ変化をなくす。
 const WAVE_HEIGHT = 16;
 
-// ノイズゲート: この RMS 以下は環境音とみなし波形を平らにする (実測: 無音 ≈ 0.003)。
-const NOISE_FLOOR = 0.01;
-// この RMS で振幅が最大になる (実測: 発話 ≈ 0.042)。
-const LEVEL_CEIL = 0.045;
+// アダプティブノイズゲートの絶対下限 (静音環境)。
+const NOISE_FLOOR_MIN = 0.006;
+// この RMS で振幅が最大になる。小声 (≈0.02) でもフルスケール近くに達するよう設定。
+const LEVEL_CEIL = 0.025;
 
-/** 録音中の音量 (audio-level) に応じて振幅するオシレーター風の波形。 */
+const BAR_COUNT = 24;
+
+/** 録音中の音量 (audio-level) に応じて高さが変わる縦棒バー型オーディオビジュアライザー。 */
 function Waveform({ active }: { active: boolean }) {
   const pathRef = useRef<SVGPathElement>(null);
-  const levelRef = useRef(0); // Rust から届く生 RMS (実測: 無音 ≈ 0.003, 発話 ≈ 0.042)
-  const smoothRef = useRef(0); // 平滑化した振幅 (0〜1)
+  const levelRef = useRef(0);
+  const smoothRef = useRef(0);
+  const barLevelsRef = useRef<Float32Array>(new Float32Array(BAR_COUNT));
   const phaseRef = useRef(0);
+  // 環境音レベルを動的に追跡するアダプティブノイズフロア。
+  const envFloorRef = useRef(NOISE_FLOOR_MIN);
 
   useEffect(() => {
     const promise = listen<number>("audio-level", (ev) => {
@@ -34,31 +39,45 @@ function Waveform({ active }: { active: boolean }) {
     if (!active) {
       levelRef.current = 0;
       smoothRef.current = 0;
+      barLevelsRef.current.fill(0);
+      envFloorRef.current = NOISE_FLOOR_MIN;
       return;
     }
     let raf = 0;
     const mid = WAVE_HEIGHT / 2;
+    const maxAmp = mid - 1.5;
     const render = () => {
-      // ノイズフロアを引いて発話帯域を 0〜1 に再マッピングする。
-      // 環境音 (NOISE_FLOOR 以下) は 0 になり、波形が平らになる。
-      const norm = (levelRef.current - NOISE_FLOOR) / (LEVEL_CEIL - NOISE_FLOOR);
-      const target = Math.max(0, Math.min(1, norm));
-      smoothRef.current += (target - smoothRef.current) * 0.25;
-      phaseRef.current += 0.35;
-      // 振幅は平滑化したレベルにそのまま比例させる (無音時は直線)。
-      const amp = (mid - 1) * smoothRef.current;
+      const level = levelRef.current;
+      // 声とみなせない範囲（現フロアの2倍以下）でのみ環境音フロアをゆっくり追跡する。
+      if (level < envFloorRef.current * 2.0) {
+        envFloorRef.current += (level - envFloorRef.current) * 0.01;
+        envFloorRef.current = Math.max(NOISE_FLOOR_MIN, envFloorRef.current);
+      }
+      // 1.2倍マージン: 環境音は多少許容しつつ小声は通す。
+      const dynamicFloor = envFloorRef.current * 1.2;
+      const norm = (level - dynamicFloor) / (LEVEL_CEIL - dynamicFloor);
+      // pow(0.4): 小音量でもフルスケールに早く到達する非線形マッピング。
+      const target = Math.pow(Math.max(0, Math.min(1, norm)), 0.4);
+      smoothRef.current += (target - smoothRef.current) * 0.2;
+      phaseRef.current += 0.25;
+
+      const barW = WAVE_WIDTH / BAR_COUNT;
       let d = "";
-      for (let x = 0; x <= WAVE_WIDTH; x += 2) {
-        // 2 つの正弦波を重ねてオシレーターらしい揺らぎを出す。
-        const y =
-          mid +
-          Math.sin(x * 0.22 + phaseRef.current) * amp +
-          Math.sin(x * 0.07 - phaseRef.current * 0.6) * amp * 0.25;
-        d += (x === 0 ? "M" : "L") + x + " " + y.toFixed(1) + " ";
+      for (let i = 0; i < BAR_COUNT; i++) {
+        // 各バーに位相差を持たせて隣同士で高さが波打つようにする。
+        const wave =
+          Math.sin(i * 0.55 + phaseRef.current) * 0.65 +
+          Math.sin(i * 0.2 - phaseRef.current * 0.8) * 0.35;
+        // wave は -1〜1 なので abs で常に正の高さにする。
+        // 下限0.4を設けて、波の谷でもバーが極端に小さくならないようにする。
+        const barTarget = smoothRef.current * Math.max(0.4, Math.abs(wave));
+        barLevelsRef.current[i] += (barTarget - barLevelsRef.current[i]) * 0.3;
+        const h = Math.max(0.5, maxAmp * barLevelsRef.current[i]);
+        const cx = (i + 0.5) * barW;
+        d += `M ${cx.toFixed(1)} ${(mid - h).toFixed(1)} L ${cx.toFixed(1)} ${(mid + h).toFixed(1)} `;
       }
       pathRef.current?.setAttribute("d", d);
-      // 無音時は薄く、発話時にはっきり見えるよう不透明度をレベルに連動させる。
-      const opacity = 0.25 + smoothRef.current * 0.75;
+      const opacity = 0.3 + smoothRef.current * 0.7;
       pathRef.current?.setAttribute("stroke-opacity", opacity.toFixed(2));
       raf = requestAnimationFrame(render);
     };
@@ -78,9 +97,8 @@ function Waveform({ active }: { active: boolean }) {
         ref={pathRef}
         fill="none"
         stroke="currentColor"
-        strokeWidth={2}
+        strokeWidth={2.5}
         strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );
