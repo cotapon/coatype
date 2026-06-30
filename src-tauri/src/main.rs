@@ -43,6 +43,13 @@ fn main() {
 
             let settings = Settings::load(&settings_path);
             let dict = Dictionary::load(&dict_path);
+
+            // visible:false の設定ウィンドウが起動直後に getSettings/getDictionary を invoke するため、
+            // HistoryStore::open / keychain 照会 / reqwest 構築 (重い処理) より先に manage して
+            // Windows WebView2 との起動レースを防ぐ。
+            app.manage(SettingsPath(settings_path));
+            app.manage(DictPath(dict_path));
+
             let history = Arc::new(HistoryStore::open(&db_path)?);
 
             let stt_key = keychain::resolve_api_key_for(ACCOUNT_COMMON).unwrap_or_default();
@@ -72,8 +79,6 @@ fn main() {
             let paused_arc = Arc::new(AtomicBool::new(false));
 
             app.manage(pipeline.clone());
-            app.manage(SettingsPath(settings_path));
-            app.manage(DictPath(dict_path));
             app.manage(ListenerState(active_shortcut_state.clone()));
             app.manage(ListenerBindings(bindings_arc.clone()));
             app.manage(ListenerPaused(paused_arc.clone()));
