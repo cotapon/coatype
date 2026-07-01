@@ -121,9 +121,20 @@ export const CODE_TO_COMBO: Record<string, string> = {
   Digit9: "9",
 };
 
-/** コンボ文字列を表示用ラベルに変換 ("leftmeta+leftcontrol+v" → "Left ⌘ + Left ⌃ + V") */
-export function comboToLabel(combo: string): string {
-  const partLabel: Record<string, string> = {
+/** 実行中の OS。ラベル表示の記号切り替え専用 (combo の永続化・パースには影響しない)。
+ *  起動時に getPlatform() の結果で setPlatform() を1回呼ぶまでは "macos" のまま (既存挙動維持)。 */
+let currentPlatform: "macos" | "windows" | "linux" = "macos";
+
+/** アプリ起動時に1回呼ぶ。未知の値は無視する。 */
+export function setPlatform(os: string): void {
+  if (os === "macos" || os === "windows" || os === "linux") {
+    currentPlatform = os;
+  }
+}
+
+/** 修飾キーの簡潔ラベル (comboToLabel 用)。macOS は記号、Windows/Linux は英語表記。 */
+const PART_LABEL_SHORT: Record<"macos" | "windows" | "linux", Record<string, string>> = {
+  macos: {
     rightoption: "Right ⌥",
     leftoption: "Left ⌥",
     rightcontrol: "Right ⌃",
@@ -132,14 +143,78 @@ export function comboToLabel(combo: string): string {
     rightshift: "Right ⇧",
     leftmeta: "Left ⌘",
     rightmeta: "Right ⌘",
-    space: "Space",
-    escape: "Escape",
-    enter: "Enter",
-    tab: "Tab",
-    home: "Home",
-    end: "End",
-    fn: "Fn",
-  };
+  },
+  windows: {
+    rightoption: "Right Alt",
+    leftoption: "Left Alt",
+    rightcontrol: "Right Ctrl",
+    leftcontrol: "Left Ctrl",
+    leftshift: "Left Shift",
+    rightshift: "Right Shift",
+    leftmeta: "Left Win",
+    rightmeta: "Right Win",
+  },
+  linux: {
+    rightoption: "Right Alt",
+    leftoption: "Left Alt",
+    rightcontrol: "Right Ctrl",
+    leftcontrol: "Left Ctrl",
+    leftshift: "Left Shift",
+    rightshift: "Right Shift",
+    leftmeta: "Left Super",
+    rightmeta: "Right Super",
+  },
+};
+
+/** 修飾キーの冗長ラベル (comboToVerboseLabel 用)。macOS は記号+英単語、Windows/Linux は英語表記のみ。
+ *  Winロゴ記号 (⊞) はフォント欠落しうるため使わず、プレーンな "Win" テキストにする。 */
+const PART_LABEL_VERBOSE: Record<"macos" | "windows" | "linux", Record<string, string>> = {
+  macos: {
+    rightoption: "⌥ Right Option",
+    leftoption: "⌥ Left Option",
+    rightcontrol: "⌃ Right Control",
+    leftcontrol: "⌃ Left Control",
+    leftshift: "⇧ Left Shift",
+    rightshift: "⇧ Right Shift",
+    leftmeta: "⌘ Left Command",
+    rightmeta: "⌘ Right Command",
+  },
+  windows: {
+    rightoption: "Right Alt",
+    leftoption: "Left Alt",
+    rightcontrol: "Right Ctrl",
+    leftcontrol: "Left Ctrl",
+    leftshift: "Left Shift",
+    rightshift: "Right Shift",
+    leftmeta: "Left Win",
+    rightmeta: "Right Win",
+  },
+  linux: {
+    rightoption: "Right Alt",
+    leftoption: "Left Alt",
+    rightcontrol: "Right Ctrl",
+    leftcontrol: "Left Ctrl",
+    leftshift: "Left Shift",
+    rightshift: "Right Shift",
+    leftmeta: "Left Super",
+    rightmeta: "Right Super",
+  },
+};
+
+const COMMON_PART_LABEL: Record<string, string> = {
+  space: "Space",
+  escape: "Escape",
+  enter: "Enter",
+  tab: "Tab",
+  home: "Home",
+  end: "End",
+  fn: "Fn",
+};
+
+/** コンボ文字列を表示用ラベルに変換 ("leftmeta+leftcontrol+v" → "Left ⌘ + Left ⌃ + V")。
+ *  修飾キー表記は現在の OS (setPlatform で設定) に応じて切り替わる。 */
+export function comboToLabel(combo: string): string {
+  const partLabel = { ...COMMON_PART_LABEL, ...PART_LABEL_SHORT[currentPlatform] };
   return combo
     .split("+")
     .map((p) => {
@@ -152,25 +227,10 @@ export function comboToLabel(combo: string): string {
 }
 
 /** コンボ文字列を冗長ラベルに変換 ("rightoption" → "⌥ Right Option")。
- *  ステータスカードやキーバインドのチップ表示用に、記号 + 英単語で示す。 */
+ *  ステータスカードやキーバインドのチップ表示用に、記号 + 英単語で示す (macOS)。
+ *  Windows/Linux では記号を使わず英語表記のみ。 */
 export function comboToVerboseLabel(combo: string): string {
-  const partLabel: Record<string, string> = {
-    rightoption: "⌥ Right Option",
-    leftoption: "⌥ Left Option",
-    rightcontrol: "⌃ Right Control",
-    leftcontrol: "⌃ Left Control",
-    leftshift: "⇧ Left Shift",
-    rightshift: "⇧ Right Shift",
-    leftmeta: "⌘ Left Command",
-    rightmeta: "⌘ Right Command",
-    space: "Space",
-    escape: "Escape",
-    enter: "Enter",
-    tab: "Tab",
-    home: "Home",
-    end: "End",
-    fn: "Fn",
-  };
+  const partLabel = { ...COMMON_PART_LABEL, ...PART_LABEL_VERBOSE[currentPlatform] };
   return combo
     .split("+")
     .map((p) => {
