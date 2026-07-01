@@ -177,6 +177,14 @@ pub async fn open_url(url: String) {
     std::process::Command::new("cmd").args(["/c", "start", &url]).spawn().ok();
 }
 
+/// 実行中の OS を返す ("macos" | "windows" | "linux")。
+/// フロントエンドでの修飾キー表示ラベル切り替え専用。デフォルト値や combo の正規化は
+/// Rust 側の #[cfg(target_os)] で完結させており、これは表示目的のみ。
+#[tauri::command]
+pub fn get_platform() -> String {
+    std::env::consts::OS.to_string()
+}
+
 /// キーバインド設定中 (CaptureModal 表示中) はリスナーを一時停止する。
 #[tauri::command]
 pub async fn set_listener_paused(

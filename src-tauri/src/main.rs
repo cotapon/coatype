@@ -246,6 +246,7 @@ fn main() {
             coatype_lib::commands::start_test_recording,
             coatype_lib::commands::stop_test_recording,
             coatype_lib::commands::open_url,
+            coatype_lib::commands::get_platform,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CoAType");

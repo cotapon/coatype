@@ -61,3 +61,6 @@ export const startTestRecording = () => invoke<void>("start_test_recording");
 export const stopTestRecording = () => invoke<string>("stop_test_recording");
 
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
+
+/** 実行中の OS ("macos" | "windows" | "linux") を取得する。起動直後に呼ばれるためリトライ付き。 */
+export const getPlatform = () => invokeWithRetry<string>("get_platform");
