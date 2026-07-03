@@ -24,6 +24,8 @@ export interface Settings {
   translate_mode: boolean;
   stt: ProviderConfig;
   show_overlay: boolean;
+  /** 選択中の入力デバイス名。null ならシステムのデフォルトマイクを使う。 */
+  input_device?: string | null;
 }
 
 export interface DictionaryEntry {

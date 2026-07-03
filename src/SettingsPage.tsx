@@ -40,6 +40,7 @@ import {
   activeShortcut,
   setListenerPaused,
   startTestRecording, stopTestRecording,
+  listInputDevices, startMicTest, stopMicTest,
   openUrl,
 } from "./invoke";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
@@ -187,6 +188,14 @@ const IconUpload = ({ className }: { className?: string }) => (
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
     <polyline points="17 8 12 3 7 8" />
     <line x1="12" y1="3" x2="12" y2="15" />
+  </Svg>
+);
+const IconRefresh = ({ className }: { className?: string }) => (
+  <Svg className={className}>
+    <path d="M4 12a8 8 0 0 1 14.5-4.5" />
+    <path d="M18.5 4v4h-4" />
+    <path d="M20 12a8 8 0 0 1-14.5 4.5" />
+    <path d="M5.5 20v-4h4" />
   </Svg>
 );
 const IconDownload = ({ className }: { className?: string }) => (
@@ -611,6 +620,8 @@ function GeneralPane({
         modelLabel={settings.stt.model || "未設定"}
         onError={onError}
       />
+
+      <MicSection settings={settings} onChange={set} onError={onError} />
 
       <Section title="言語">
         <Panel className="p-4">
@@ -1201,6 +1212,231 @@ function CaptureModal({
               isDisabled={!capturedCombo || isCapturing}
             >
               保存
+            </Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
+  );
+}
+
+// --------------- マイク選択 / テスト ---------------
+
+/** null (システムのデフォルト) を Select で表現するためのセンチネル値。 */
+const MIC_DEFAULT = "__default__";
+
+/** マイクテストのレベルメーターで振幅がフルスケールになる RMS 値。
+ *  StatusOverlay の Waveform と同じ LevelAccumulator 由来の値を受け取るため、
+ *  同程度の値 (小声でも反応するよう低め) を採用する。 */
+const MIC_TEST_LEVEL_CEIL = 0.025;
+
+function MicSection({
+  settings, onChange, onError,
+}: {
+  settings: Settings;
+  onChange: (patch: Partial<Settings>) => void;
+  onError: (text: string) => void;
+}) {
+  const [devices, setDevices] = useState<string[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
+  const [showMicTest, setShowMicTest] = useState(false);
+
+  const reloadDevices = () => {
+    setLoadingDevices(true);
+    listInputDevices()
+      .then(setDevices)
+      .catch((e) => onError(String(e)))
+      .finally(() => setLoadingDevices(false));
+  };
+
+  // 初回マウント時に一度だけ取得する。
+  useEffect(() => {
+    reloadDevices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selected = settings.input_device ?? MIC_DEFAULT;
+
+  return (
+    <Section title="マイク">
+      <Panel className="p-4">
+        <div className="flex items-center gap-3">
+          <IconTile><IconMic className="size-[18px]" /></IconTile>
+          <span className="text-sm font-medium text-foreground">マイク</span>
+          <Select
+            aria-label="マイク"
+            variant="secondary"
+            className="ml-2 flex-1"
+            value={selected}
+            onChange={(v) =>
+              onChange({ input_device: v === MIC_DEFAULT ? null : String(v) })
+            }
+          >
+            <Select.Trigger>
+              <Select.Value />
+              <Select.Indicator />
+            </Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                <ListBox.Item id={MIC_DEFAULT} textValue="システムのデフォルト">
+                  システムのデフォルト
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+                {/* 保存済みのデバイスが一覧から消えている場合でも選択状態を表示し続ける */}
+                {settings.input_device && !devices.includes(settings.input_device) && (
+                  <ListBox.Item id={settings.input_device} textValue={settings.input_device}>
+                    {settings.input_device}
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                )}
+                {devices.map((d) => (
+                  <ListBox.Item key={d} id={d} textValue={d}>
+                    {d}
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                ))}
+              </ListBox>
+            </Select.Popover>
+          </Select>
+          <Button
+            variant="secondary"
+            isDisabled={loadingDevices}
+            onPress={reloadDevices}
+            aria-label="デバイス一覧を再取得"
+          >
+            <IconRefresh className="size-4" />
+          </Button>
+          <Button variant="secondary" onPress={() => setShowMicTest(true)}>
+            テスト
+          </Button>
+        </div>
+        <p className="mt-2.5 pl-12 text-xs text-muted">文字起こしに使用するマイクを選択します</p>
+      </Panel>
+
+      {showMicTest && (
+        <MicTestModal
+          device={settings.input_device ?? null}
+          onClose={() => setShowMicTest(false)}
+        />
+      )}
+    </Section>
+  );
+}
+
+function MicTestModal({ device, onClose }: { device: string | null; onClose: () => void }) {
+  const [running, setRunning] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const levelRef = useRef(0);
+
+  // マイクテスト中はグローバルショートカットを止め、モーダル終了時に必ず後始末する。
+  useEffect(() => {
+    setListenerPaused(true).catch(console.error);
+    let cancelled = false;
+    startMicTest(device).catch((e) => {
+      if (!cancelled) setError(String(e));
+    });
+    return () => {
+      cancelled = true;
+      stopMicTest().catch(console.error);
+      setListenerPaused(false).catch(console.error);
+    };
+  }, [device]);
+
+  // 本番の audio-level とは別イベントで、テスト専用の録音レベルを受け取る。
+  useEffect(() => {
+    const promise = listen<number>("mic-test-level", (ev) => {
+      levelRef.current = ev.payload;
+    });
+    return () => {
+      promise.then((fn) => fn());
+    };
+  }, []);
+
+  // 再レンダリングを避けるため、レベルバーの幅は ref 経由で直接 DOM を更新する
+  // (StatusOverlay の Waveform と同じ方針)。
+  useEffect(() => {
+    if (!running) {
+      if (barRef.current) barRef.current.style.width = "0%";
+      return;
+    }
+    let raf = 0;
+    const render = () => {
+      const norm = Math.pow(
+        Math.max(0, Math.min(1, levelRef.current / MIC_TEST_LEVEL_CEIL)),
+        0.4,
+      );
+      if (barRef.current) barRef.current.style.width = `${Math.round(norm * 100)}%`;
+      raf = requestAnimationFrame(render);
+    };
+    render();
+    return () => cancelAnimationFrame(raf);
+  }, [running]);
+
+  const handleStop = () => {
+    stopMicTest().catch(console.error);
+    levelRef.current = 0;
+    setRunning(false);
+  };
+
+  return (
+    <Modal.Backdrop
+      variant="blur"
+      isOpen
+      onOpenChange={(open) => { if (!open) onClose(); }}
+    >
+      <Modal.Container>
+        <Modal.Dialog className="sm:max-w-[420px]">
+          <Modal.Header>
+            <Modal.Heading>マイクをテスト</Modal.Heading>
+            <p className="mt-1.5 text-sm text-muted">
+              選択したマイクをテストするために話してください
+            </p>
+          </Modal.Header>
+          <Modal.Body>
+            <div className="rounded-xl border border-border bg-surface-secondary p-4">
+              <div className="mb-2.5 flex items-center justify-between text-sm">
+                <span className="font-medium text-foreground">
+                  {device ?? "システムのデフォルト"}
+                </span>
+                {!error && (
+                  <span className="text-xs font-medium text-success">
+                    {running ? "アクティブ" : "停止中"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <IconMic className="size-4 shrink-0 text-muted" />
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-tertiary">
+                  <div
+                    ref={barRef}
+                    className="h-full rounded-full bg-accent transition-[width] duration-75"
+                    style={{ width: "0%" }}
+                  />
+                </div>
+              </div>
+            </div>
+            {error ? (
+              <Alert status="danger" className="mt-3">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Description>{error}</Alert.Description>
+                </Alert.Content>
+              </Alert>
+            ) : (
+              <p className="mt-3 text-center text-xs text-muted">
+                自分の声に反応してバーが動くはずです。動かない場合はマイクの権限を確認してください
+              </p>
+            )}
+          </Modal.Body>
+          <Modal.Footer>
+            {running && (
+              <Button variant="danger" onPress={handleStop}>
+                停止
+              </Button>
+            )}
+            <Button variant="secondary" onPress={onClose}>
+              閉じる
             </Button>
           </Modal.Footer>
         </Modal.Dialog>

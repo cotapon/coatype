@@ -19,6 +19,9 @@ pub struct Pipeline {
     pub history: Arc<HistoryStore>,
     pub translate: Arc<Mutex<bool>>,
     pub language: Arc<Mutex<String>>,
+    /// 選択中の入力デバイス名。None ならシステムのデフォルトマイクを使う。
+    /// save_settings から update_input_device 経由で即時反映される (api_key と同じパターン)。
+    pub input_device: Arc<Mutex<Option<String>>>,
     started_at: Mutex<Option<Instant>>,
     pub current_task: Mutex<Option<CurrentTask>>,
 }
@@ -30,6 +33,7 @@ impl Pipeline {
         history: Arc<HistoryStore>,
         language: String,
         translate: bool,
+        input_device: Option<String>,
     ) -> Self {
         Self {
             recorder: Mutex::new(Recorder::new()),
@@ -38,6 +42,7 @@ impl Pipeline {
             history,
             translate: Arc::new(Mutex::new(translate)),
             language: Arc::new(Mutex::new(language)),
+            input_device: Arc::new(Mutex::new(input_device)),
             started_at: Mutex::new(None),
             current_task: Mutex::new(None),
         }
@@ -47,6 +52,13 @@ impl Pipeline {
 
     pub fn update_api_key(&self, key: String) {
         self.client.lock().unwrap().set_api_key(key);
+    }
+
+    // ── 入力デバイス更新 ──────────────────────────────────────────
+
+    /// 選択中の入力デバイスを更新する。次回の録音開始から反映される (再起動不要)。
+    pub fn update_input_device(&self, device: Option<String>) {
+        *self.input_device.lock().unwrap() = device;
     }
 
     // ── クライアント再構築 ───────────────────────────────────────
@@ -65,7 +77,8 @@ impl Pipeline {
 
     pub fn start(&self, on_level: Option<LevelCb>) -> anyhow::Result<()> {
         tracing::info!("recording: start");
-        self.recorder.lock().unwrap().start(on_level)?;
+        let device = self.input_device.lock().unwrap().clone();
+        self.recorder.lock().unwrap().start(device.as_deref(), on_level)?;
         *self.started_at.lock().unwrap() = Some(Instant::now());
         Ok(())
     }

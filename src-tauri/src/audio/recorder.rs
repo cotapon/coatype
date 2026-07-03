@@ -31,11 +31,26 @@ impl Recorder {
         }
     }
 
-    pub fn start(&mut self, on_level: Option<LevelCb>) -> anyhow::Result<()> {
+    /// `device` に名前を指定すると、そのデバイスを cpal のデバイス一覧から探して使う。
+    /// 見つからない場合 (抜線・改名など) はシステムのデフォルト入力デバイスにフォールバックする。
+    /// `None` の場合は最初からデフォルトデバイスを使う。
+    pub fn start(&mut self, device: Option<&str>, on_level: Option<LevelCb>) -> anyhow::Result<()> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow::anyhow!("no input device"))?;
+        let device = match device {
+            Some(name) => {
+                let found = host
+                    .input_devices()?
+                    .find(|d| d.name().map(|n| n == name).unwrap_or(false));
+                if found.is_none() {
+                    tracing::warn!(
+                        "recorder: requested input device '{name}' not found, falling back to default"
+                    );
+                }
+                found.or_else(|| host.default_input_device())
+            }
+            None => host.default_input_device(),
+        };
+        let device = device.ok_or_else(|| anyhow::anyhow!("no input device"))?;
         let config = device.default_input_config()?;
         self.sample_rate = config.sample_rate().0;
         tracing::info!(
@@ -155,6 +170,26 @@ impl LevelAccumulator {
     }
 }
 
+/// 利用可能な入力デバイス名の一覧を返す (設定画面のマイク選択セレクト用)。
+/// 名前取得に失敗したデバイスはスキップし、重複は取り除く。
+pub fn list_input_device_names() -> anyhow::Result<Vec<String>> {
+    let host = cpal::default_host();
+    let mut names: Vec<String> = host
+        .input_devices()?
+        .filter_map(|d| d.name().ok())
+        .collect();
+    names.dedup();
+    Ok(names)
+}
+
+/// 要求されたデバイス名が利用可能な一覧に含まれていればそれを返し、
+/// 含まれていなければ (未検出/未指定) None (= システムのデフォルトを使う) を返す。
+/// cpal 実機に依存しない純粋関数として切り出し、フォールバック判定をテスト可能にする。
+pub fn resolve_device_name(available: &[String], requested: Option<&str>) -> Option<String> {
+    let requested = requested?;
+    available.iter().find(|n| n.as_str() == requested).cloned()
+}
+
 pub fn samples_to_wav(samples: &[i16], sample_rate: u32) -> Vec<u8> {
     let spec = WavSpec {
         channels: 1,
@@ -184,5 +219,26 @@ mod tests {
         assert_eq!(&bytes[0..4], b"RIFF");
         assert_eq!(&bytes[8..12], b"WAVE");
         assert!(bytes.len() > 44 + samples.len() * 2 - 1);
+    }
+
+    #[test]
+    fn resolve_device_name_returns_requested_when_available() {
+        let available = vec!["Built-in Microphone".to_string(), "USB Microphone".to_string()];
+        assert_eq!(
+            resolve_device_name(&available, Some("USB Microphone")),
+            Some("USB Microphone".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_device_name_falls_back_to_default_when_not_found() {
+        let available = vec!["Built-in Microphone".to_string()];
+        assert_eq!(resolve_device_name(&available, Some("Missing Mic")), None);
+    }
+
+    #[test]
+    fn resolve_device_name_returns_none_when_not_requested() {
+        let available = vec!["Built-in Microphone".to_string()];
+        assert_eq!(resolve_device_name(&available, None), None);
     }
 }

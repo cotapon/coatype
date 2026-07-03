@@ -1,3 +1,4 @@
+use crate::audio::recorder::Recorder;
 use crate::config::settings::{KeyBinding, Settings};
 use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryItem;
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{Emitter, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveShortcut {
@@ -23,6 +24,11 @@ pub struct ShowOverlay(pub Arc<AtomicBool>);
 
 pub struct SettingsPath(pub PathBuf);
 pub struct DictPath(pub PathBuf);
+
+/// マイクテスト専用の Recorder。Pipeline の本番用 recorder とは状態を共有しない。
+/// これにより「設定画面でマイクテスト中」と「グローバルショートカットでの本番録音」が
+/// バッファ/ストリームを奪い合わずに共存できる。
+pub struct MicTest(pub Mutex<Recorder>);
 
 #[tauri::command]
 pub async fn get_settings(path: State<'_, SettingsPath>) -> Result<Settings, String> {
@@ -41,6 +47,7 @@ pub async fn save_settings(
     let p: &Pipeline = &**pipeline;
     *p.translate.lock().unwrap() = settings.translate_mode;
     *p.language.lock().unwrap() = settings.language.clone();
+    p.update_input_device(settings.input_device.clone());
 
     let stt_key = keychain::resolve_api_key().unwrap_or_default();
     p.rebuild_stt_client(&settings.stt, stt_key);
@@ -166,6 +173,52 @@ pub async fn stop_test_recording(pipeline: State<'_, Arc<Pipeline>>) -> Result<S
         .stop_and_transcribe_test()
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 利用可能な入力デバイス名の一覧を返す (マイク選択セレクト用)。
+#[tauri::command]
+pub async fn list_input_devices() -> Result<Vec<String>, String> {
+    crate::audio::recorder::list_input_device_names().map_err(|e| e.to_string())
+}
+
+/// マイクテスト開始: 文字起こしをせず、レベルメーター表示専用に録音を開始する。
+/// Pipeline 本番の recorder とは独立した専用 recorder (MicTest state) を使うため、
+/// 本番録音 (グローバルショートカット) やハンズフリー中でも競合しない。
+/// `device` はまだ保存されていない選択中のデバイス名を直接渡せる (保存前でもテスト可能)。
+#[tauri::command]
+pub async fn start_mic_test(
+    device: Option<String>,
+    mic_test: State<'_, MicTest>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    // 冪等化: 既存のテストストリームが残っていれば先に破棄する。
+    let _ = mic_test.0.lock().unwrap().stop();
+
+    let (level_tx, level_rx) = std::sync::mpsc::channel::<f32>();
+    let on_level: crate::audio::recorder::LevelCb = Box::new(move |lvl: f32| {
+        let _ = level_tx.send(lvl);
+    });
+    std::thread::spawn(move || {
+        while let Ok(lvl) = level_rx.recv() {
+            let _ = app.emit("mic-test-level", lvl);
+        }
+    });
+
+    mic_test
+        .0
+        .lock()
+        .unwrap()
+        .start(device.as_deref(), Some(on_level))
+        .map_err(|e| e.to_string())
+}
+
+/// マイクテスト停止: 録音を停止して WAV データは破棄する (文字起こしは行わない)。
+/// ストリームの drop で on_level クロージャも drop され、level_tx が切れて
+/// start_mic_test 内の emit スレッドは自然終了する。
+#[tauri::command]
+pub async fn stop_mic_test(mic_test: State<'_, MicTest>) -> Result<(), String> {
+    let _ = mic_test.0.lock().unwrap().stop();
+    Ok(())
 }
 
 /// 外部 URL をデフォルトブラウザで開く。

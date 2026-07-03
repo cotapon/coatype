@@ -1,9 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use coatype_lib::api::whisper::WhisperClient;
+use coatype_lib::audio::recorder::Recorder;
 use coatype_lib::commands::{
-    ActiveShortcut, DictPath, ListenerBindings, ListenerPaused, ListenerState, SettingsPath,
-    ShowOverlay, bindings_to_registered,
+    ActiveShortcut, DictPath, ListenerBindings, ListenerPaused, ListenerState, MicTest,
+    SettingsPath, ShowOverlay, bindings_to_registered,
 };
 use coatype_lib::config::settings::Settings;
 use coatype_lib::dictionary::replace::Dictionary;
@@ -67,6 +68,7 @@ fn main() {
                 history,
                 settings.language.clone(),
                 settings.translate_mode,
+                settings.input_device.clone(),
             ));
 
             let active_shortcut_state = Arc::new(Mutex::new(ActiveShortcut {
@@ -85,6 +87,8 @@ fn main() {
 
             let show_overlay_arc = Arc::new(AtomicBool::new(settings.show_overlay));
             app.manage(ShowOverlay(show_overlay_arc.clone()));
+
+            app.manage(MicTest(Mutex::new(Recorder::new())));
 
             // 設定ウィンドウの × は閉じる代わりに隠す
             if let Some(settings_win) = app.get_webview_window("settings") {
@@ -245,6 +249,9 @@ fn main() {
             coatype_lib::commands::set_listener_paused,
             coatype_lib::commands::start_test_recording,
             coatype_lib::commands::stop_test_recording,
+            coatype_lib::commands::list_input_devices,
+            coatype_lib::commands::start_mic_test,
+            coatype_lib::commands::stop_mic_test,
             coatype_lib::commands::open_url,
             coatype_lib::commands::get_platform,
         ])

@@ -60,6 +60,14 @@ export const setListenerPaused = (paused: boolean) =>
 export const startTestRecording = () => invoke<void>("start_test_recording");
 export const stopTestRecording = () => invoke<string>("stop_test_recording");
 
+/** 利用可能な入力デバイス名の一覧を取得する。 */
+export const listInputDevices = () => invokeWithRetry<string[]>("list_input_devices");
+/** マイクテスト開始: 文字起こしせず、レベルメーター表示専用に録音を開始する。 */
+export const startMicTest = (device: string | null) =>
+  invoke<void>("start_mic_test", { device });
+/** マイクテスト停止: 録音を停止して破棄する (文字起こしなし)。 */
+export const stopMicTest = () => invoke<void>("stop_mic_test");
+
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
 
 /** 実行中の OS ("macos" | "windows" | "linux") を取得する。起動直後に呼ばれるためリトライ付き。 */

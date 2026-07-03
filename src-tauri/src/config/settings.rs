@@ -60,6 +60,9 @@ pub struct Settings {
     pub shortcut: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger_mode: Option<TriggerMode>,
+    /// 選択中の入力デバイス名 (cpal の device.name())。None ならシステムのデフォルトマイクを使用。
+    #[serde(default)]
+    pub input_device: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -154,6 +157,7 @@ impl Default for Settings {
             legacy_api_base: None,
             shortcut: None,
             trigger_mode: None,
+            input_device: None,
         }
     }
 }
@@ -445,5 +449,26 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert!(!parsed.show_overlay);
+    }
+
+    #[test]
+    fn input_device_defaults_to_none_when_missing() {
+        let json = r#"{
+            "language": "ja",
+            "bindings": [],
+            "translate_mode": false,
+            "stt": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}}
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.input_device, None, "input_device が JSON にない場合は None がデフォルト");
+    }
+
+    #[test]
+    fn input_device_roundtrip() {
+        let mut s = Settings::default();
+        s.input_device = Some("USB Microphone".to_string());
+        let json = serde_json::to_string(&s).unwrap();
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.input_device.as_deref(), Some("USB Microphone"));
     }
 }
