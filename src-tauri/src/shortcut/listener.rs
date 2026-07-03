@@ -31,7 +31,14 @@ impl ShortcutKey {
         match self {
             ShortcutKey::Single(k) => *k == pressed,
             ShortcutKey::Combo { modifiers, key } => {
-                *key == pressed && modifiers.iter().all(|m| held.contains(m))
+                // 押されたキーがこのコンボの構成キーであり、かつコンボの全キーが
+                // 押下中(held)なら、押した順序に関係なく発火する。
+                // held には呼び出し側で pressed が挿入済みのため、どちらのキーを
+                // 最後に押しても全キーが揃った瞬間に一致する。
+                // is_part を必須にすることで、コンボ成立中に無関係なキーを押しても
+                // 再発火しない(HandsFree / Cancel の誤発火防止)。
+                let is_part = *key == pressed || modifiers.contains(&pressed);
+                is_part && held.contains(key) && modifiers.iter().all(|m| held.contains(m))
             }
         }
     }
@@ -295,5 +302,55 @@ mod tests {
     fn parse_shortcut_case_insensitive() {
         assert!(parse_shortcut("RightOption").is_some());
         assert!(parse_shortcut("LeftMeta+LeftControl+V").is_some());
+    }
+
+    #[test]
+    fn matches_press_order_independent_modifier_then_key() {
+        // Right Option → Right Shift の順(主キーを最後に押す、従来から動くケース)
+        let sk = parse_shortcut("rightoption+rightshift").unwrap();
+        let mut held: HashSet<Key> = HashSet::new();
+        held.insert(Key::AltGr);
+        assert!(!sk.matches_press(Key::AltGr, &held), "1つ目のキーだけでは発火しない");
+
+        held.insert(Key::ShiftRight);
+        assert!(sk.matches_press(Key::ShiftRight, &held), "両方揃ったら発火する");
+    }
+
+    #[test]
+    fn matches_press_order_independent_key_then_modifier() {
+        // Right Shift → Right Option の順(従来は発火しなかった逆順ケース)
+        let sk = parse_shortcut("rightoption+rightshift").unwrap();
+        let mut held: HashSet<Key> = HashSet::new();
+        held.insert(Key::ShiftRight);
+        assert!(!sk.matches_press(Key::ShiftRight, &held), "1つ目のキーだけでは発火しない");
+
+        held.insert(Key::AltGr);
+        assert!(sk.matches_press(Key::AltGr, &held), "逆順で完成しても発火する");
+    }
+
+    #[test]
+    fn matches_press_unrelated_key_does_not_trigger() {
+        let sk = parse_shortcut("rightoption+rightshift").unwrap();
+        let mut held: HashSet<Key> = HashSet::new();
+        held.insert(Key::AltGr);
+        held.insert(Key::ShiftRight);
+        // コンボが揃った状態で、コンボと無関係なキーを押しても発火しない
+        assert!(!sk.matches_press(Key::KeyA, &held));
+    }
+
+    #[test]
+    fn matches_press_multi_modifier_any_completion_order() {
+        let sk = parse_shortcut("leftmeta+leftcontrol+v").unwrap();
+
+        // 3キーの完成順を入れ替えても、揃った瞬間に発火する
+        let mut held: HashSet<Key> = HashSet::new();
+        held.insert(Key::KeyV);
+        assert!(!sk.matches_press(Key::KeyV, &held));
+
+        held.insert(Key::ControlLeft);
+        assert!(!sk.matches_press(Key::ControlLeft, &held));
+
+        held.insert(Key::MetaLeft);
+        assert!(sk.matches_press(Key::MetaLeft, &held));
     }
 }

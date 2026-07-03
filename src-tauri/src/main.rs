@@ -91,12 +91,18 @@ fn main() {
             app.manage(MicTest(Mutex::new(Recorder::new())));
 
             // 設定ウィンドウの × は閉じる代わりに隠す
+            // 設定ウィンドウを開いている間だけ Dock / Cmd+Tab にアイコンを出す
+            // (Accessory のままだと最前面化が不安定なため、表示中は Regular に戻す)
             if let Some(settings_win) = app.get_webview_window("settings") {
                 let settings_win2 = settings_win.clone();
+                let app_handle_for_close = app.handle().clone();
                 settings_win.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = settings_win2.hide();
+                        #[cfg(target_os = "macos")]
+                        let _ = app_handle_for_close
+                            .set_activation_policy(tauri::ActivationPolicy::Accessory);
                     }
                 });
             }
@@ -115,6 +121,8 @@ fn main() {
                     "quit" => app.exit(0),
                     "settings" => {
                         if let Some(w) = app.get_webview_window("settings") {
+                            #[cfg(target_os = "macos")]
+                            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
