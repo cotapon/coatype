@@ -41,12 +41,16 @@ pub fn restore_frontmost(pid: i32) {
 
     // AtomicU32 を target_pid の一時置き場として使い回す
     found.store(target_pid, Ordering::Relaxed);
-    unsafe { let _ = EnumWindows(Some(enum_proc), LPARAM(found_ptr)); }
+    unsafe {
+        let _ = EnumWindows(Some(enum_proc), LPARAM(found_ptr));
+    }
 
     let hwnd_val = found.load(Ordering::Relaxed);
     // target_pid のまま変化していなければ HWND は見つからなかった
     if hwnd_val != target_pid && hwnd_val != 0 {
-        unsafe { let _ = SetForegroundWindow(HWND(hwnd_val as *mut _)); }
+        unsafe {
+            let _ = SetForegroundWindow(HWND(hwnd_val as *mut _));
+        }
     }
 }
 

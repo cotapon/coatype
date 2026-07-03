@@ -31,29 +31,20 @@ async function invokeWithRetry<T>(
 // 起動時に呼ばれる読み取り系コマンドはリトライ付きで呼ぶ。
 // 保存系・副作用系はリトライ不要なので通常の invoke のまま。
 export const getSettings = () => invokeWithRetry<Settings>("get_settings");
-export const saveSettings = (settings: Settings) =>
-  invoke<void>("save_settings", { settings });
+export const saveSettings = (settings: Settings) => invoke<void>("save_settings", { settings });
 export const getDictionary = () => invokeWithRetry<Dictionary>("get_dictionary");
-export const saveDictionary = (dict: Dictionary) =>
-  invoke<void>("save_dictionary", { dict });
-export const importDictionary = (path: string) =>
-  invoke<Dictionary>("import_dictionary", { path });
-export const exportDictionary = (path: string) =>
-  invoke<void>("export_dictionary", { path });
-export const listHistory = (limit: number) =>
-  invoke<HistoryItem[]>("list_history", { limit });
+export const saveDictionary = (dict: Dictionary) => invoke<void>("save_dictionary", { dict });
+export const importDictionary = (path: string) => invoke<Dictionary>("import_dictionary", { path });
+export const exportDictionary = (path: string) => invoke<void>("export_dictionary", { path });
+export const listHistory = (limit: number) => invoke<HistoryItem[]>("list_history", { limit });
 export const clearHistory = () => invoke<void>("clear_history");
 
-export const saveApiKey = (key: string) =>
-  invoke<void>("save_api_key", { key });
+export const saveApiKey = (key: string) => invoke<void>("save_api_key", { key });
 export const hasApiKey = () => invokeWithRetry<boolean>("has_api_key");
 
-export const checkAccessibility = () =>
-  invokeWithRetry<boolean>("check_accessibility");
-export const openAccessibilitySettings = () =>
-  invoke<void>("open_accessibility_settings");
-export const activeShortcut = () =>
-  invokeWithRetry<ActiveShortcut>("active_shortcut");
+export const checkAccessibility = () => invokeWithRetry<boolean>("check_accessibility");
+export const openAccessibilitySettings = () => invoke<void>("open_accessibility_settings");
+export const activeShortcut = () => invokeWithRetry<ActiveShortcut>("active_shortcut");
 export const setListenerPaused = (paused: boolean) =>
   invoke<void>("set_listener_paused", { paused });
 
@@ -63,8 +54,7 @@ export const stopTestRecording = () => invoke<string>("stop_test_recording");
 /** 利用可能な入力デバイス名の一覧を取得する。 */
 export const listInputDevices = () => invokeWithRetry<string[]>("list_input_devices");
 /** マイクテスト開始: 文字起こしせず、レベルメーター表示専用に録音を開始する。 */
-export const startMicTest = (device: string | null) =>
-  invoke<void>("start_mic_test", { device });
+export const startMicTest = (device: string | null) => invoke<void>("start_mic_test", { device });
 /** マイクテスト停止: 録音を停止して破棄する (文字起こしなし)。 */
 export const stopMicTest = () => invoke<void>("stop_mic_test");
 

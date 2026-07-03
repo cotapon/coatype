@@ -7,7 +7,54 @@ on:
     branches: [main]
 
 jobs:
+  # lint・型チェック・ユニットテストを先に回し、失敗したら高コストなビルドを止める
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: check-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            check-cargo-
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: cargo fmt
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: cargo test
+        run: npm test
+
   build:
+    needs: check
     strategy:
       fail-fast: false
       matrix:

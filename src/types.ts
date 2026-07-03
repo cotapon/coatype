@@ -1,7 +1,5 @@
 export type AuthKind =
-  | { kind: "bearer" }
-  | { kind: "api_key_header"; header_name: string }
-  | { kind: "none" };
+  { kind: "bearer" } | { kind: "api_key_header"; header_name: string } | { kind: "none" };
 
 export interface ProviderConfig {
   base_url: string;
@@ -9,7 +7,8 @@ export interface ProviderConfig {
   auth_kind: AuthKind;
 }
 
-export type ActionKind = "start_record" | "hands_free" | "cancel";
+/** "unknown" は Rust 側 `#[serde(other)] Unknown` に対応する (将来のアクション種別が来ても壊れない)。 */
+export type ActionKind = "start_record" | "hands_free" | "cancel" | "unknown";
 
 export interface KeyBinding {
   id: string;
@@ -22,6 +21,8 @@ export interface Settings {
   language: string;
   bindings: KeyBinding[];
   translate_mode: boolean;
+  /** 翻訳モードで使うモデル名。Rust 側 Settings と同じフィールド (UI は未実装)。 */
+  translate_model: string | null;
   stt: ProviderConfig;
   show_overlay: boolean;
   /** 選択中の入力デバイス名。null ならシステムのデフォルトマイクを使う。 */
@@ -55,6 +56,7 @@ export const ACTION_LABELS: Record<ActionKind, string> = {
   start_record: "録音",
   hands_free: "ハンズフリー",
   cancel: "キャンセル",
+  unknown: "不明",
 };
 
 /** KeyboardEvent.code → rdev 互換文字列への変換テーブル */

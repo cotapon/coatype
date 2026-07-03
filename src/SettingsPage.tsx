@@ -24,23 +24,27 @@ import type {
   KeyBinding,
   ActionKind,
 } from "./types";
+import { CODE_TO_COMBO, comboToLabel, comboToVerboseLabel, detectImeConflict } from "./types";
 import {
-  CODE_TO_COMBO,
-  comboToLabel,
-  comboToVerboseLabel,
-  detectImeConflict,
-} from "./types";
-import {
-  getSettings, saveSettings,
-  getDictionary, saveDictionary,
-  importDictionary, exportDictionary,
-  listHistory, clearHistory,
-  saveApiKey, hasApiKey,
-  checkAccessibility, openAccessibilitySettings,
+  getSettings,
+  saveSettings,
+  getDictionary,
+  saveDictionary,
+  importDictionary,
+  exportDictionary,
+  listHistory,
+  clearHistory,
+  saveApiKey,
+  hasApiKey,
+  checkAccessibility,
+  openAccessibilitySettings,
   activeShortcut,
   setListenerPaused,
-  startTestRecording, stopTestRecording,
-  listInputDevices, startMicTest, stopMicTest,
+  startTestRecording,
+  stopTestRecording,
+  listInputDevices,
+  startMicTest,
+  stopMicTest,
   openUrl,
 } from "./invoke";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
@@ -48,222 +52,46 @@ import { checkForUpdate, downloadAndInstallUpdate } from "./updater";
 import type { Update } from "./updater";
 import { LANGUAGES } from "./languages";
 import logoUrl from "./assets/logo.png";
+import {
+  IconHome,
+  IconCube,
+  IconKey,
+  IconBook,
+  IconClock,
+  IconMic,
+  IconGlobe,
+  IconKeyboard,
+  IconHand,
+  IconX,
+  IconWaveform,
+  IconPencil,
+  IconTrash,
+  IconPlus,
+  IconWarning,
+  IconCopy,
+  IconUpload,
+  IconRefresh,
+  IconDownload,
+} from "./icons";
+import { PaneHeader, Section, Panel, IconTile } from "./ui";
+import { useTextSelection, type SelectionInfo } from "./hooks/useTextSelection";
 
 type Pane = "general" | "models" | "apikey" | "dictionary" | "history";
 
-// --------------- アイコン (軽量インライン SVG) ---------------
-
-function Svg({ className = "size-4", children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.7}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
-
-const IconHome = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M4 11.5 12 4l8 7.5" />
-    <path d="M6 10v9.5h12V10" />
-  </Svg>
-);
-const IconCube = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z" />
-    <path d="M4 7.5 12 12l8-4.5" />
-    <path d="M12 12v9" />
-  </Svg>
-);
-const IconKey = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <circle cx="8.5" cy="8.5" r="4" />
-    <line x1="11.4" y1="11.4" x2="20" y2="20" />
-    <line x1="17.5" y1="17.5" x2="19.5" y2="15.5" />
-    <line x1="15" y1="15" x2="17" y2="13" />
-  </Svg>
-);
-const IconBook = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M5 4.5h9a2 2 0 0 1 2 2V20a2 2 0 0 0-2-2H5z" />
-    <path d="M19 6.5V18a2 2 0 0 0-2 2" />
-  </Svg>
-);
-const IconClock = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <circle cx="12" cy="12" r="8.2" />
-    <path d="M12 7.5v5l3.2 2" />
-  </Svg>
-);
-const IconMic = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <rect x="9" y="3" width="6" height="11" rx="3" />
-    <path d="M6 11a6 6 0 0 0 12 0" />
-    <line x1="12" y1="17" x2="12" y2="21" />
-    <line x1="9" y1="21" x2="15" y2="21" />
-  </Svg>
-);
-const IconGlobe = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M3.5 12h17" />
-    <path d="M12 3.5c2.5 2.3 2.5 14.7 0 17M12 3.5c-2.5 2.3-2.5 14.7 0 17" />
-  </Svg>
-);
-const IconKeyboard = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <rect x="3" y="6" width="18" height="12" rx="2" />
-    <line x1="7" y1="10" x2="7" y2="10" />
-    <line x1="11" y1="10" x2="11" y2="10" />
-    <line x1="15" y1="10" x2="15" y2="10" />
-    <line x1="8" y1="14" x2="16" y2="14" />
-  </Svg>
-);
-const IconHand = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V11" />
-    <path d="M12 10.5v-1a1.5 1.5 0 0 1 3 0V11" />
-    <path d="M15 10.5a1.5 1.5 0 0 1 3 0V15a5 5 0 0 1-5 5h-1.5a4 4 0 0 1-3-1.4L5 15.5a1.6 1.6 0 0 1 2.3-2.2L9 15V8a1.5 1.5 0 0 1 3 0" />
-  </Svg>
-);
-const IconX = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <line x1="6" y1="6" x2="18" y2="18" />
-    <line x1="18" y1="6" x2="6" y2="18" />
-  </Svg>
-);
-const IconWaveform = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <line x1="5" y1="10" x2="5" y2="14" />
-    <line x1="9" y1="7" x2="9" y2="17" />
-    <line x1="12" y1="4" x2="12" y2="20" />
-    <line x1="15" y1="7" x2="15" y2="17" />
-    <line x1="19" y1="10" x2="19" y2="14" />
-  </Svg>
-);
-const IconPencil = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M4 20h4L19 9l-4-4L4 16v4z" />
-    <path d="M14 6l4 4" />
-  </Svg>
-);
-const IconTrash = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M5 7h14" />
-    <path d="M9.5 7V5h5v2" />
-    <path d="M7 7l.9 12h8.2L17 7" />
-    <line x1="10.5" y1="10.5" x2="10.5" y2="15.5" />
-    <line x1="13.5" y1="10.5" x2="13.5" y2="15.5" />
-  </Svg>
-);
-const IconPlus = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <line x1="12" y1="5" x2="12" y2="19" />
-    <line x1="5" y1="12" x2="19" y2="12" />
-  </Svg>
-);
-const IconWarning = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M12 3.5l8.5 15h-17z" />
-    <line x1="12" y1="9.5" x2="12" y2="13.5" />
-    <circle cx="12" cy="16.5" r="0.8" fill="currentColor" stroke="none" />
-  </Svg>
-);
-const IconCopy = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <rect x="9" y="9" width="11" height="11" rx="2" />
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-  </Svg>
-);
-const IconUpload = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="17 8 12 3 7 8" />
-    <line x1="12" y1="3" x2="12" y2="15" />
-  </Svg>
-);
-const IconRefresh = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M4 12a8 8 0 0 1 14.5-4.5" />
-    <path d="M18.5 4v4h-4" />
-    <path d="M20 12a8 8 0 0 1-14.5 4.5" />
-    <path d="M5.5 20v-4h4" />
-  </Svg>
-);
-const IconDownload = ({ className }: { className?: string }) => (
-  <Svg className={className}>
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="7 10 12 15 17 10" />
-    <line x1="12" y1="3" x2="12" y2="15" />
-  </Svg>
-);
-
-// --------------- 共通レイアウト要素 ---------------
-
-/** ペイン見出し (タイトル + サブタイトル) */
-function PaneHeader({ title, subtitle }: { title: string; subtitle: string }) {
-  return (
-    <div className="mb-6">
-      <h1 className="text-[26px] font-bold tracking-tight text-foreground">{title}</h1>
-      <p className="mt-1 text-sm text-muted">{subtitle}</p>
-    </div>
-  );
-}
-
-/** 太字の中見出しを持つセクション */
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="mb-7">
-      <h2 className="mb-3 text-[15px] font-bold text-foreground">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-/** 白いカードコンテナ (rounded-xl + 枠線 + 影) */
-function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div
-      className={`rounded-xl border border-border bg-surface shadow-[var(--surface-shadow)] ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-/** 小さな丸アイコンタイル (淡いアクセント背景) */
-function IconTile({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div
-      className={`flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
-
 const PANES: { id: Pane; Icon: React.ComponentType<{ className?: string }>; label: string }[] = [
-  { id: "general",    Icon: IconHome,  label: "一般設定"   },
-  { id: "models",     Icon: IconCube,  label: "モデル設定" },
-  { id: "apikey",     Icon: IconKey,   label: "APIキー"    },
-  { id: "dictionary", Icon: IconBook,  label: "辞書・語彙" },
-  { id: "history",    Icon: IconClock, label: "履歴"       },
+  { id: "general", Icon: IconHome, label: "一般設定" },
+  { id: "models", Icon: IconCube, label: "モデル設定" },
+  { id: "apikey", Icon: IconKey, label: "APIキー" },
+  { id: "dictionary", Icon: IconBook, label: "辞書・語彙" },
+  { id: "history", Icon: IconClock, label: "履歴" },
 ];
 
 const PANE_META: Record<Pane, { title: string; subtitle: string }> = {
-  general:    { title: "一般設定",       subtitle: "CoAType の基本設定をカスタマイズします" },
-  models:     { title: "モデル設定",     subtitle: "STT で使うエンドポイント・モデルを設定します" },
-  apikey:     { title: "API キー",       subtitle: "API キーは macOS Keychain に安全に保存されます" },
-  dictionary: { title: "辞書・語彙",     subtitle: "文字起こし結果を辞書で自動補正します" },
-  history:    { title: "文字起こし履歴", subtitle: "過去の文字起こし結果を確認します" },
+  general: { title: "一般設定", subtitle: "CoAType の基本設定をカスタマイズします" },
+  models: { title: "モデル設定", subtitle: "STT で使うエンドポイント・モデルを設定します" },
+  apikey: { title: "APIキー", subtitle: "APIキーは macOS Keychain に安全に保存されます" },
+  dictionary: { title: "辞書・語彙", subtitle: "文字起こし結果を辞書で自動補正します" },
+  history: { title: "文字起こし履歴", subtitle: "過去の文字起こし結果を確認します" },
 };
 
 export function SettingsPage() {
@@ -279,15 +107,29 @@ export function SettingsPage() {
   const [banner, setBanner] = useState<{ type: "saved" | "error"; text: string } | null>(null);
   const [appVersion, setAppVersion] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
+  // 自動保存 (debounce) の状態表示。トーストほど主張しない常設インジケータで
+  // 「保存されたかわからない」を解消する
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const saveIndicatorTimer = useRef<number | undefined>(undefined);
+
+  const markSaved = () => {
+    setSaveState("saved");
+    window.clearTimeout(saveIndicatorTimer.current);
+    saveIndicatorTimer.current = window.setTimeout(() => setSaveState("idle"), 1500);
+  };
 
   const settingsLoaded = useRef(false);
   const dictLoaded = useRef(false);
 
-  const refreshListenerState = () =>
-    activeShortcut().then(setListenerState).catch(console.error);
+  const refreshListenerState = () => activeShortcut().then(setListenerState).catch(console.error);
 
   const refreshKeyStatus = () => {
     hasApiKey().then(setKeyExists).catch(console.error);
+  };
+
+  const flash = (type: "saved" | "error", text: string) => {
+    setBanner({ type, text });
+    if (type === "saved") setTimeout(() => setBanner(null), 2000);
   };
 
   // 設定の初期ロード。invoke.ts の invokeWithRetry により起動レースに対して耐性があるが、
@@ -304,7 +146,9 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadSettings();
-    getDictionary().then(setDict).catch(console.error);
+    getDictionary()
+      .then(setDict)
+      .catch((e) => flash("error", `辞書の読み込みに失敗しました: ${e}`));
     refreshKeyStatus();
     checkAccessibility().then(setAccessibilityOk).catch(console.error);
     refreshListenerState();
@@ -325,7 +169,10 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (pane === "history") listHistory(100).then(setHistory).catch(console.error);
+    if (pane === "history")
+      listHistory(100)
+        .then(setHistory)
+        .catch((e) => flash("error", `履歴の読み込みに失敗しました: ${e}`));
   }, [pane]);
 
   // 設定の自動保存 (変更を 500ms debounce して保存)
@@ -336,9 +183,16 @@ export function SettingsPage() {
       return;
     }
     const t = setTimeout(() => {
+      setSaveState("saving");
       saveSettings(settings)
-        .then(refreshListenerState)
-        .catch((e) => flash("error", String(e)));
+        .then(() => {
+          markSaved();
+          return refreshListenerState();
+        })
+        .catch((e) => {
+          setSaveState("idle");
+          flash("error", String(e));
+        });
     }, 500);
     return () => clearTimeout(t);
   }, [settings]);
@@ -350,28 +204,35 @@ export function SettingsPage() {
       return;
     }
     const t = setTimeout(() => {
-      saveDictionary(dict).catch((e) => flash("error", String(e)));
+      setSaveState("saving");
+      saveDictionary(dict)
+        .then(markSaved)
+        .catch((e) => {
+          setSaveState("idle");
+          flash("error", String(e));
+        });
     }, 500);
     return () => clearTimeout(t);
   }, [dict]);
-
-  const flash = (type: "saved" | "error", text: string) => {
-    setBanner({ type, text });
-    if (type === "saved") setTimeout(() => setBanner(null), 2000);
-  };
 
   const handleSaveApiKey = async (key: string) => {
     try {
       await saveApiKey(key);
       refreshKeyStatus();
       setApiKey("");
-      flash("saved", "APIキーを保存しました ✓");
-    } catch (e) { flash("error", String(e)); }
+      flash("saved", "APIキーを保存しました");
+    } catch (e) {
+      flash("error", String(e));
+    }
   };
 
   const handleClearHistory = async () => {
-    try { await clearHistory(); setHistory([]); }
-    catch (e) { flash("error", String(e)); }
+    try {
+      await clearHistory();
+      setHistory([]);
+    } catch (e) {
+      flash("error", String(e));
+    }
   };
 
   const handleRegisterDictEntry = (from: string, to: string) => {
@@ -381,7 +242,7 @@ export function SettingsPage() {
         ? dict.entries.map((e) => (e.from === from ? { ...e, to } : e))
         : [...dict.entries, { from, to }],
     });
-    flash("saved", isUpdate ? "辞書を上書きしました ✓" : "辞書に登録しました ✓");
+    flash("saved", isUpdate ? "辞書を上書きしました" : "辞書に登録しました");
   };
 
   const handleReset = () => {
@@ -437,6 +298,7 @@ export function SettingsPage() {
                 <button
                   key={id}
                   onClick={() => setPane(id)}
+                  aria-current={active ? "page" : undefined}
                   className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                     active
                       ? "bg-accent text-accent-foreground shadow-sm"
@@ -466,7 +328,9 @@ export function SettingsPage() {
               </div>
               <div className="min-w-0 leading-tight">
                 <div className="text-sm font-semibold text-foreground">CoAType</div>
-                <div className="text-xs text-muted">{appVersion ? `Version ${appVersion}` : "—"}</div>
+                <div className="text-xs text-muted">
+                  {appVersion ? `Version ${appVersion}` : "—"}
+                </div>
               </div>
             </div>
           </div>
@@ -476,6 +340,14 @@ export function SettingsPage() {
         <main className="min-w-0 flex-1 py-3 pr-3">
           <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-[var(--surface-shadow)]">
             <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
+              {saveState !== "idle" && (
+                <div
+                  role="status"
+                  className="pointer-events-none fixed right-8 top-6 z-40 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted shadow-sm"
+                >
+                  {saveState === "saving" ? "保存中…" : "保存しました ✓"}
+                </div>
+              )}
               <div className="mx-auto w-full max-w-[760px]">
                 <PaneHeader {...PANE_META[pane]} />
 
@@ -492,9 +364,7 @@ export function SettingsPage() {
                     onReset={handleReset}
                   />
                 )}
-                {pane === "models" && (
-                  <ModelsPane settings={settings} onChange={setSettings} />
-                )}
+                {pane === "models" && <ModelsPane settings={settings} onChange={setSettings} />}
                 {pane === "apikey" && (
                   <ApiKeyPane
                     apiKey={apiKey}
@@ -519,7 +389,6 @@ export function SettingsPage() {
           </div>
         </main>
       </div>
-
     </div>
   );
 }
@@ -527,7 +396,13 @@ export function SettingsPage() {
 // --------------- General ---------------
 
 function GeneralPane({
-  settings, onChange, accessibilityOk, onRefreshAccessibility, listenerState, onError, onReset,
+  settings,
+  onChange,
+  accessibilityOk,
+  onRefreshAccessibility,
+  listenerState,
+  onError,
+  onReset,
 }: {
   settings: Settings;
   onChange: (s: Settings) => void;
@@ -586,8 +461,9 @@ function GeneralPane({
   const langOption = LANGUAGES.find((l) => l.code === settings.language);
   const langLabel = langOption ? `${langOption.label} (${langOption.code})` : settings.language;
 
-  const startBinding = settings.bindings.find((b) => b.action === "start_record" && b.enabled)
-    ?? settings.bindings.find((b) => b.action === "start_record");
+  const startBinding =
+    settings.bindings.find((b) => b.action === "start_record" && b.enabled) ??
+    settings.bindings.find((b) => b.action === "start_record");
   const recKeyLabel = startBinding ? comboToVerboseLabel(startBinding.combo) : "未設定";
 
   return (
@@ -598,8 +474,8 @@ function GeneralPane({
           <Alert.Content>
             <Alert.Title>アクセシビリティ権限が必要です</Alert.Title>
             <Alert.Description>
-              グローバルショートカットを使うには「システム設定 → プライバシーとセキュリティ → アクセシビリティ」で
-              CoAType を許可してください。
+              グローバルショートカットを使うには「システム設定 → プライバシーとセキュリティ →
+              アクセシビリティ」で CoAType を許可してください。
             </Alert.Description>
             <div className="mt-2 flex gap-2">
               <Button size="sm" variant="secondary" onPress={() => openAccessibilitySettings()}>
@@ -626,7 +502,9 @@ function GeneralPane({
       <Section title="言語">
         <Panel className="p-4">
           <div className="flex items-center gap-3">
-            <IconTile><IconGlobe className="size-[18px]" /></IconTile>
+            <IconTile>
+              <IconGlobe className="size-[18px]" />
+            </IconTile>
             <span className="text-sm font-medium text-foreground">言語</span>
             <Select
               aria-label="言語"
@@ -694,7 +572,9 @@ function GeneralPane({
                   バージョン {updateAvailable.version} が利用可能です
                 </p>
                 {updateAvailable.body && (
-                  <p className="mt-1 whitespace-pre-wrap text-xs text-muted">{updateAvailable.body}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-muted">
+                    {updateAvailable.body}
+                  </p>
                 )}
               </div>
               <div className="flex justify-end">
@@ -704,7 +584,13 @@ function GeneralPane({
                   isDisabled={updateInstalling}
                   className="shrink-0"
                 >
-                  {updateInstalling ? <><Spinner className="size-4" /> インストール中…</> : "今すぐ更新"}
+                  {updateInstalling ? (
+                    <>
+                      <Spinner className="size-4" /> インストール中…
+                    </>
+                  ) : (
+                    "今すぐ更新"
+                  )}
                 </Button>
               </div>
             </div>
@@ -721,7 +607,13 @@ function GeneralPane({
                 isDisabled={updateChecking}
                 className="shrink-0"
               >
-                {updateChecking ? <><Spinner className="size-4" /> 確認中…</> : "更新を確認"}
+                {updateChecking ? (
+                  <>
+                    <Spinner className="size-4" /> 確認中…
+                  </>
+                ) : (
+                  "更新を確認"
+                )}
               </Button>
             </div>
           )}
@@ -731,7 +623,9 @@ function GeneralPane({
       <Section title="設定のリセット">
         <Panel className="p-4">
           <div className="flex items-center justify-between gap-4">
-            <p className="text-sm text-muted">この画面を開いた時点の設定に戻します。今回行った変更は破棄されます。</p>
+            <p className="text-sm text-muted">
+              この画面を開いた時点の設定に戻します。今回行った変更は破棄されます。
+            </p>
             <Button variant="danger" onPress={() => setShowResetConfirm(true)} className="shrink-0">
               設定をリセット
             </Button>
@@ -739,13 +633,15 @@ function GeneralPane({
         </Panel>
       </Section>
 
-      <p className="mt-2 text-center text-[11px] text-muted/50">© 2025 cotapon</p>
+      <p className="mt-2 text-center text-[11px] text-muted">© 2026 cotapon</p>
 
       {showResetConfirm && (
         <Modal.Backdrop
           variant="blur"
           isOpen
-          onOpenChange={(open) => { if (!open) setShowResetConfirm(false); }}
+          onOpenChange={(open) => {
+            if (!open) setShowResetConfirm(false);
+          }}
         >
           <Modal.Container>
             <Modal.Dialog className="sm:max-w-[400px]">
@@ -759,7 +655,13 @@ function GeneralPane({
                 <Button variant="secondary" onPress={() => setShowResetConfirm(false)}>
                   キャンセル
                 </Button>
-                <Button variant="danger" onPress={() => { onReset(); setShowResetConfirm(false); }}>
+                <Button
+                  variant="danger"
+                  onPress={() => {
+                    onReset();
+                    setShowResetConfirm(false);
+                  }}
+                >
                   リセット
                 </Button>
               </Modal.Footer>
@@ -772,7 +674,10 @@ function GeneralPane({
 }
 
 function OptionRow({
-  title, description, isSelected, onChange,
+  title,
+  description,
+  isSelected,
+  onChange,
 }: {
   title: string;
   description: string;
@@ -801,7 +706,11 @@ function OptionRow({
 type TestState = "idle" | "recording" | "transcribing";
 
 function StatusCard({
-  listenerState, langLabel, recKeyLabel, modelLabel, onError,
+  listenerState,
+  langLabel,
+  recKeyLabel,
+  modelLabel,
+  onError,
 }: {
   listenerState: ActiveShortcut | null;
   langLabel: string;
@@ -870,7 +779,9 @@ function StatusCard({
           <div className="flex size-14 items-center justify-center rounded-full bg-accent text-accent-foreground shadow-sm">
             <IconMic className="size-7" />
           </div>
-          <span className={`absolute bottom-0.5 right-0.5 size-3.5 rounded-full border-2 border-surface ${dotClass}`} />
+          <span
+            className={`absolute bottom-0.5 right-0.5 size-3.5 rounded-full border-2 border-surface ${dotClass}`}
+          />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-lg font-bold text-foreground">{title}</div>
@@ -912,7 +823,9 @@ function StatusCard({
 }
 
 function SummaryItem({
-  Icon, label, value,
+  Icon,
+  label,
+  value,
 }: {
   Icon: React.ComponentType<{ className?: string }>;
   label: string;
@@ -920,7 +833,9 @@ function SummaryItem({
 }) {
   return (
     <div className="flex items-center gap-2.5">
-      <IconTile><Icon className="size-[18px]" /></IconTile>
+      <IconTile>
+        <Icon className="size-[18px]" />
+      </IconTile>
       <div className="min-w-0">
         <div className="text-xs text-muted">{label}</div>
         <div className="truncate text-sm font-medium text-foreground">{value}</div>
@@ -937,12 +852,14 @@ const ACTION_ICONS: Record<ActionKind, React.ComponentType<{ className?: string 
   start_record: IconMic,
   hands_free: IconHand,
   cancel: IconX,
+  unknown: IconWarning,
 };
 
 const ACTION_ROW_LABELS: Record<ActionKind, string> = {
   start_record: "録音開始",
   hands_free: "ハンズフリー開始",
   cancel: "キャンセル",
+  unknown: "不明なアクション",
 };
 
 type CaptureState =
@@ -951,7 +868,8 @@ type CaptureState =
   | { mode: "add" };
 
 function KeybindingsSection({
-  bindings, onChange,
+  bindings,
+  onChange,
 }: {
   bindings: KeyBinding[];
   onChange: (b: KeyBinding[]) => void;
@@ -991,10 +909,16 @@ function KeybindingsSection({
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-muted">
                     <Icon className="size-[18px]" />
                   </div>
-                  <span className="text-sm font-medium text-foreground">{ACTION_ROW_LABELS[action]}</span>
+                  <span className="text-sm font-medium text-foreground">
+                    {ACTION_ROW_LABELS[action]}
+                  </span>
                   <div className="ml-auto flex items-center gap-2">
                     <span className="text-sm text-muted">未設定</span>
-                    <Button size="sm" variant="secondary" onPress={() => setCapture({ mode: "set", action })}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => setCapture({ mode: "set", action })}
+                    >
                       設定
                     </Button>
                     <Button isIconOnly size="sm" variant="secondary" isDisabled aria-label="削除">
@@ -1010,7 +934,9 @@ function KeybindingsSection({
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
                   <Icon className="size-[18px]" />
                 </div>
-                <span className="text-sm font-medium text-foreground">{ACTION_ROW_LABELS[action]}</span>
+                <span className="text-sm font-medium text-foreground">
+                  {ACTION_ROW_LABELS[action]}
+                </span>
                 <div className="ml-auto flex items-center gap-2.5">
                   <span className="inline-flex items-center rounded-lg bg-surface-secondary px-2.5 py-1 text-sm font-medium text-foreground">
                     {comboToVerboseLabel(binding.combo)}
@@ -1025,7 +951,9 @@ function KeybindingsSection({
                       isIconOnly
                       size="sm"
                       variant="secondary"
-                      onPress={() => setCapture({ mode: "edit", id: binding.id, action, combo: binding.combo })}
+                      onPress={() =>
+                        setCapture({ mode: "edit", id: binding.id, action, combo: binding.combo })
+                      }
                       aria-label="編集"
                     >
                       <IconPencil className="size-4" />
@@ -1071,7 +999,10 @@ function KeybindingsSection({
 // --------------- CaptureModal ---------------
 
 function CaptureModal({
-  presetAction, initialCombo, onConfirm, onClose,
+  presetAction,
+  initialCombo,
+  onConfirm,
+  onClose,
 }: {
   presetAction?: ActionKind;
   initialCombo?: string;
@@ -1089,7 +1020,9 @@ function CaptureModal({
   // モーダルが開いている間はグローバルリスナーを停止して録音を防ぐ
   useEffect(() => {
     setListenerPaused(true).catch(console.error);
-    return () => { setListenerPaused(false).catch(console.error); };
+    return () => {
+      setListenerPaused(false).catch(console.error);
+    };
   }, []);
 
   useEffect(() => {
@@ -1126,8 +1059,12 @@ function CaptureModal({
   }, [isCapturing]);
 
   const displayText = isCapturing
-    ? (displayKeys.length > 0 ? comboToLabel(displayKeys.join("+")) : "キーを押してください...")
-    : (capturedCombo ? comboToLabel(capturedCombo) : "");
+    ? displayKeys.length > 0
+      ? comboToLabel(displayKeys.join("+"))
+      : "キーを押してください..."
+    : capturedCombo
+      ? comboToLabel(capturedCombo)
+      : "";
 
   const startCapture = () => {
     setIsCapturing(true);
@@ -1140,7 +1077,9 @@ function CaptureModal({
       variant="blur"
       isOpen
       isKeyboardDismissDisabled={isCapturing}
-      onOpenChange={(open) => { if (!open) onClose(); }}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
       <Modal.Container>
         <Modal.Dialog className="sm:max-w-[400px]">
@@ -1153,7 +1092,9 @@ function CaptureModal({
           <Modal.Body>
             {!presetAction && (
               <div className="mb-3">
-                <label className="mb-1.5 block text-sm font-medium text-foreground">アクション</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">
+                  アクション
+                </label>
                 <Select
                   aria-label="アクション"
                   variant="secondary"
@@ -1231,7 +1172,9 @@ const MIC_DEFAULT = "__default__";
 const MIC_TEST_LEVEL_CEIL = 0.025;
 
 function MicSection({
-  settings, onChange, onError,
+  settings,
+  onChange,
+  onError,
 }: {
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
@@ -1261,16 +1204,16 @@ function MicSection({
     <Section title="マイク">
       <Panel className="p-4">
         <div className="flex items-center gap-3">
-          <IconTile><IconMic className="size-[18px]" /></IconTile>
+          <IconTile>
+            <IconMic className="size-[18px]" />
+          </IconTile>
           <span className="text-sm font-medium text-foreground">マイク</span>
           <Select
             aria-label="マイク"
             variant="secondary"
             className="ml-2 flex-1"
             value={selected}
-            onChange={(v) =>
-              onChange({ input_device: v === MIC_DEFAULT ? null : String(v) })
-            }
+            onChange={(v) => onChange({ input_device: v === MIC_DEFAULT ? null : String(v) })}
           >
             <Select.Trigger>
               <Select.Value />
@@ -1362,10 +1305,7 @@ function MicTestModal({ device, onClose }: { device: string | null; onClose: () 
     }
     let raf = 0;
     const render = () => {
-      const norm = Math.pow(
-        Math.max(0, Math.min(1, levelRef.current / MIC_TEST_LEVEL_CEIL)),
-        0.4,
-      );
+      const norm = Math.pow(Math.max(0, Math.min(1, levelRef.current / MIC_TEST_LEVEL_CEIL)), 0.4);
       if (barRef.current) barRef.current.style.width = `${Math.round(norm * 100)}%`;
       raf = requestAnimationFrame(render);
     };
@@ -1383,7 +1323,9 @@ function MicTestModal({ device, onClose }: { device: string | null; onClose: () 
     <Modal.Backdrop
       variant="blur"
       isOpen
-      onOpenChange={(open) => { if (!open) onClose(); }}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
       <Modal.Container>
         <Modal.Dialog className="sm:max-w-[420px]">
@@ -1448,9 +1390,9 @@ function MicTestModal({ device, onClose }: { device: string | null; onClose: () 
 // --------------- Models ---------------
 
 const AUTH_KIND_OPTIONS = [
-  { value: "bearer",         label: "Bearer トークン" },
+  { value: "bearer", label: "Bearer トークン" },
   { value: "api_key_header", label: "カスタムヘッダー" },
-  { value: "none",           label: "認証なし" },
+  { value: "none", label: "認証なし" },
 ];
 
 function authKindTag(k: AuthKind): string {
@@ -1483,9 +1425,7 @@ function ProviderSection({
 }) {
   const set = (patch: Partial<typeof config>) => onChange({ ...config, ...patch });
   const tag = authKindTag(config.auth_kind);
-  const headerName = config.auth_kind.kind === "api_key_header"
-    ? config.auth_kind.header_name
-    : "";
+  const headerName = config.auth_kind.kind === "api_key_header" ? config.auth_kind.header_name : "";
 
   return (
     <Section title={label}>
@@ -1555,7 +1495,8 @@ function ProviderSection({
 }
 
 function ModelsPane({
-  settings, onChange,
+  settings,
+  onChange,
 }: {
   settings: Settings;
   onChange: (s: Settings) => void;
@@ -1578,20 +1519,19 @@ function ModelsPane({
 // --------------- Dictionary ---------------
 
 function DictionaryPane({
-  dict, onChange, flash,
+  dict,
+  onChange,
+  flash,
 }: {
   dict: Dictionary;
   onChange: (d: Dictionary) => void;
   flash: (type: "saved" | "error", text: string) => void;
 }) {
   const add = () => onChange({ entries: [...dict.entries, { from: "", to: "" }] });
-  const remove = (i: number) =>
-    onChange({ entries: dict.entries.filter((_, idx) => idx !== i) });
+  const remove = (i: number) => onChange({ entries: dict.entries.filter((_, idx) => idx !== i) });
   const update = (i: number, field: "from" | "to", val: string) =>
     onChange({
-      entries: dict.entries.map((e, idx) =>
-        idx === i ? { ...e, [field]: val } : e
-      ),
+      entries: dict.entries.map((e, idx) => (idx === i ? { ...e, [field]: val } : e)),
     });
 
   const handleImport = async () => {
@@ -1603,7 +1543,7 @@ function DictionaryPane({
       if (!result || Array.isArray(result)) return; // キャンセル
       const merged = await importDictionary(result);
       onChange(merged);
-      flash("saved", `${merged.entries.length} 件をインポートしました ✓`);
+      flash("saved", `${merged.entries.length} 件をインポートしました`);
     } catch (e) {
       flash("error", String(e));
     }
@@ -1617,7 +1557,7 @@ function DictionaryPane({
       });
       if (!result) return; // キャンセル
       await exportDictionary(result);
-      flash("saved", "辞書を CSV にエクスポートしました ✓");
+      flash("saved", "辞書を CSV にエクスポートしました");
     } catch (e) {
       flash("error", String(e));
     }
@@ -1626,7 +1566,8 @@ function DictionaryPane({
   return (
     <>
       <p className="mb-5 text-xs leading-relaxed text-muted">
-        文字起こし結果に対して辞書で置換します。CSV (RFC 4180) または Dragon TXT 形式でインポートできます。
+        文字起こし結果に対して辞書で置換します。CSV (RFC 4180) または Dragon TXT
+        形式でインポートできます。
       </p>
 
       <Panel className="overflow-hidden">
@@ -1684,11 +1625,7 @@ function DictionaryPane({
           <IconUpload className="size-4" />
           インポート
         </Button>
-        <Button
-          variant="secondary"
-          onPress={handleExport}
-          isDisabled={dict.entries.length === 0}
-        >
+        <Button variant="secondary" onPress={handleExport} isDisabled={dict.entries.length === 0}>
           <IconDownload className="size-4" />
           エクスポート
         </Button>
@@ -1698,63 +1635,6 @@ function DictionaryPane({
 }
 
 // --------------- History ---------------
-
-type SelectionInfo = { text: string; rect: DOMRect; historyId: number };
-
-function useTextSelection() {
-  const [selection, setSelection] = useState<SelectionInfo | null>(null);
-  const selectionRef = useRef<SelectionInfo | null>(null);
-
-  const update = (info: SelectionInfo | null) => {
-    selectionRef.current = info;
-    setSelection(info);
-  };
-
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      const sel = window.getSelection();
-      // 有効な選択(単一アイテム内・非空)のみ更新する。
-      // 空/コラプス/アイテム跨ぎでは即 null 化しない ─ mousedown ベースのクリアに委ねる。
-      if (!sel || sel.isCollapsed || !sel.toString().trim()) return;
-      const anchor = sel.anchorNode;
-      const focus = sel.focusNode;
-      const anchorEl = (anchor instanceof Element ? anchor : anchor?.parentElement)
-        ?.closest("[data-history-id]");
-      const focusEl = (focus instanceof Element ? focus : focus?.parentElement)
-        ?.closest("[data-history-id]");
-      if (!anchorEl || !focusEl || anchorEl !== focusEl) return;
-      const historyId = Number(anchorEl.getAttribute("data-history-id"));
-      if (!historyId) return;
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      update({ text: sel.toString().trim(), rect, historyId });
-    };
-
-    // capture phase で「機能外のクリック」だけを即クリア。
-    // [data-history-id](履歴テキスト)・[data-dict-ui](ボタン/ポップオーバー)内は保持。
-    const handleMouseDown = (e: MouseEvent) => {
-      const target = e.target as Element | null;
-      if (!target?.closest("[data-history-id],[data-dict-ui]")) {
-        update(null);
-      }
-    };
-
-    const handleScroll = () => update(null);
-
-    document.addEventListener("selectionchange", handleSelectionChange);
-    document.addEventListener("mousedown", handleMouseDown, { capture: true });
-    window.addEventListener("scroll", handleScroll, { capture: true });
-    return () => {
-      document.removeEventListener("selectionchange", handleSelectionChange);
-      document.removeEventListener("mousedown", handleMouseDown, { capture: true });
-      window.removeEventListener("scroll", handleScroll, { capture: true });
-    };
-  }, []);
-
-  const clearSelection = () => update(null);
-
-  return { selection, selectionRef, clearSelection };
-}
 
 function DictRegisterPopover({
   selectionText,
@@ -1777,9 +1657,7 @@ function DictRegisterPopover({
   const POPOVER_W = 284;
   const POPOVER_H = 168;
   const left = Math.min(Math.max(rect.left, 8), window.innerWidth - POPOVER_W - 8);
-  const top = rect.top > POPOVER_H + 8
-    ? rect.top - POPOVER_H - 8
-    : rect.bottom + 8;
+  const top = rect.top > POPOVER_H + 8 ? rect.top - POPOVER_H - 8 : rect.bottom + 8;
 
   useEffect(() => {
     // rAF 遅延で登録し、開いた直後の同一 mousedown で誤って閉じるのを防ぐ
@@ -1800,7 +1678,10 @@ function DictRegisterPopover({
   }, [onClose]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
   };
 
   const handleRegisterClick = () => {
@@ -1825,32 +1706,17 @@ function DictRegisterPopover({
             <IconBook className="size-3.5 text-accent" />
             辞書に登録
           </div>
-          <TextField
-            aria-label="変換前"
-            className="w-full"
-            value={from}
-            onChange={setFrom}
-          >
+          <TextField aria-label="変換前" className="w-full" value={from} onChange={setFrom}>
             <Input placeholder="変換前 (from)" />
           </TextField>
-          <TextField
-            aria-label="変換後"
-            className="w-full"
-            value={to}
-            onChange={setTo}
-            autoFocus
-          >
+          <TextField aria-label="変換後" className="w-full" value={to} onChange={setTo} autoFocus>
             <Input placeholder="変換後 (to)" />
           </TextField>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="secondary" onPress={onClose}>
               キャンセル
             </Button>
-            <Button
-              size="sm"
-              onPress={handleRegisterClick}
-              isDisabled={!from.trim() || !to.trim()}
-            >
+            <Button size="sm" onPress={handleRegisterClick} isDisabled={!from.trim() || !to.trim()}>
               登録
             </Button>
           </div>
@@ -1873,6 +1739,13 @@ function DictRegisterPopover({
       )}
     </div>
   );
+}
+
+/** SQLite の "YYYY-MM-DD HH:MM:SS" (UTC) をローカル時刻の表記に整形する。パースできなければ原文のまま返す。 */
+function formatCreatedAt(createdAt: string): string {
+  const d = new Date(createdAt.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return createdAt;
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d);
 }
 
 function HistoryPane({
@@ -1929,12 +1802,9 @@ function HistoryPane({
             position: "fixed",
             top: Math.min(
               Math.max(selection.rect.top - FLOAT_BTN_H - 4, 8),
-              window.innerHeight - FLOAT_BTN_H - 8
+              window.innerHeight - FLOAT_BTN_H - 8,
             ),
-            left: Math.min(
-              Math.max(selection.rect.left, 8),
-              window.innerWidth - 148 - 8
-            ),
+            left: Math.min(Math.max(selection.rect.left, 8), window.innerWidth - 148 - 8),
             zIndex: 40,
           }}
           data-dict-ui=""
@@ -1982,7 +1852,7 @@ function HistoryPane({
                       {item.text}
                     </div>
                     <div className="mt-0.5 text-xs text-muted">
-                      {item.created_at} · {item.language}
+                      {formatCreatedAt(item.created_at)} · {item.language}
                       {item.translated ? " → 英語" : ""} · {item.duration_ms}ms
                     </div>
                   </div>
@@ -2037,12 +1907,12 @@ function ApiKeyPane({
 
   return (
     <>
-      <Section title="API キー">
+      <Section title="APIキー">
         <div className="flex flex-col gap-3">
           {keyExists && savedAlert("APIキーは macOS Keychain に保存済みです")}
           <Panel className="p-4">
             <TextField
-              aria-label="API キー"
+              aria-label="APIキー"
               type="password"
               className="w-full"
               value={apiKey}
@@ -2061,8 +1931,17 @@ function ApiKeyPane({
 
       <Card variant="default" className="w-full">
         <p className="text-xs leading-relaxed text-muted">
-          キーは macOS Keychain (<code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">jp.co.cotapon.coatype</code>) に保存されます。<br />
-          環境変数 <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">COATYPE_API_KEY</code> が設定されている場合はそちらが優先されます。
+          キーは macOS Keychain (
+          <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">
+            jp.co.cotapon.coatype
+          </code>
+          ) に保存されます。
+          <br />
+          環境変数{" "}
+          <code className="rounded bg-surface-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">
+            COATYPE_API_KEY
+          </code>{" "}
+          が設定されている場合はそちらが優先されます。
         </p>
       </Card>
     </>

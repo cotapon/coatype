@@ -44,7 +44,7 @@ pub async fn save_settings(
     show_overlay_state: State<'_, ShowOverlay>,
 ) -> Result<(), String> {
     settings.save(&path.0).map_err(|e| e.to_string())?;
-    let p: &Pipeline = &**pipeline;
+    let p: &Pipeline = &pipeline;
     *p.translate.lock().unwrap() = settings.translate_mode;
     *p.language.lock().unwrap() = settings.language.clone();
     p.update_input_device(settings.input_device.clone());
@@ -56,14 +56,16 @@ pub async fn save_settings(
     let new_registered = bindings_to_registered(&settings.bindings);
     *bindings_state.0.lock().unwrap() = new_registered;
 
-    show_overlay_state.0.store(settings.show_overlay, Ordering::Relaxed);
+    show_overlay_state
+        .0
+        .store(settings.show_overlay, Ordering::Relaxed);
 
     Ok(())
 }
 
 #[tauri::command]
 pub async fn get_dictionary(pipeline: State<'_, Arc<Pipeline>>) -> Result<Dictionary, String> {
-    let p: &Pipeline = &**pipeline;
+    let p: &Pipeline = &pipeline;
     Ok(p.dict.lock().unwrap().clone())
 }
 
@@ -74,7 +76,7 @@ pub async fn save_dictionary(
     dict_path: State<'_, DictPath>,
 ) -> Result<(), String> {
     dict.save(&dict_path.0).map_err(|e| e.to_string())?;
-    let p: &Pipeline = &**pipeline;
+    let p: &Pipeline = &pipeline;
     *p.dict.lock().unwrap() = dict;
     Ok(())
 }
@@ -86,10 +88,9 @@ pub async fn import_dictionary(
     dict_path: State<'_, DictPath>,
 ) -> Result<Dictionary, String> {
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let incoming =
-        crate::dictionary::io::detect_and_parse(&content).map_err(|e| e.to_string())?;
+    let incoming = crate::dictionary::io::detect_and_parse(&content).map_err(|e| e.to_string())?;
 
-    let p: &Pipeline = &**pipeline;
+    let p: &Pipeline = &pipeline;
     let mut dict = p.dict.lock().unwrap().clone();
     dict.merge(incoming);
 
@@ -104,7 +105,7 @@ pub async fn export_dictionary(
     path: String,
     pipeline: State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
-    let p: &Pipeline = &**pipeline;
+    let p: &Pipeline = &pipeline;
     let dict = p.dict.lock().unwrap().clone();
     let csv = crate::dictionary::io::to_csv(&dict).map_err(|e| e.to_string())?;
     std::fs::write(&path, csv).map_err(|e| e.to_string())?;
@@ -116,21 +117,18 @@ pub async fn list_history(
     pipeline: State<'_, Arc<Pipeline>>,
     limit: i64,
 ) -> Result<Vec<HistoryItem>, String> {
-    let p: &Pipeline = &**pipeline;
+    let p: &Pipeline = &pipeline;
     p.history.list(limit).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn clear_history(pipeline: State<'_, Arc<Pipeline>>) -> Result<(), String> {
-    let p: &Pipeline = &**pipeline;
+    let p: &Pipeline = &pipeline;
     p.history.clear().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn save_api_key(
-    key: String,
-    pipeline: State<'_, Arc<Pipeline>>,
-) -> Result<(), String> {
+pub async fn save_api_key(key: String, pipeline: State<'_, Arc<Pipeline>>) -> Result<(), String> {
     keychain::save_api_key(&key).map_err(|e| e.to_string())?;
     pipeline.update_api_key(key);
     Ok(())
@@ -227,7 +225,10 @@ pub async fn open_url(url: String) {
     #[cfg(target_os = "macos")]
     std::process::Command::new("open").arg(&url).spawn().ok();
     #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd").args(["/c", "start", &url]).spawn().ok();
+    std::process::Command::new("cmd")
+        .args(["/c", "start", &url])
+        .spawn()
+        .ok();
 }
 
 /// 実行中の OS を返す ("macos" | "windows" | "linux")。
@@ -253,57 +254,29 @@ pub async fn set_listener_paused(
 pub fn bindings_to_registered(bindings: &[KeyBinding]) -> Vec<RegisteredBinding> {
     bindings
         .iter()
-        .filter_map(|b| {
-            match parse_shortcut(&b.combo) {
-                Some(sk) => Some(RegisteredBinding {
-                    id: b.id.clone(),
-                    action: b.action.clone(),
-                    shortcut: sk,
-                    enabled: b.enabled,
-                }),
-                None => {
-                    tracing::warn!("キーバインド '{}' をパースできませんでした (id={})", b.combo, b.id);
-                    None
-                }
+        .filter_map(|b| match parse_shortcut(&b.combo) {
+            Some(sk) => Some(RegisteredBinding {
+                id: b.id.clone(),
+                action: b.action.clone(),
+                shortcut: sk,
+                enabled: b.enabled,
+            }),
+            None => {
+                tracing::warn!(
+                    "キーバインド '{}' をパースできませんでした (id={})",
+                    b.combo,
+                    b.id
+                );
+                None
             }
         })
         .collect()
-}
-
-/// IME と衝突する可能性があるコンボかどうかを判定する。
-/// Shift + 文字キー / Shift + Space は日本語 IME に消費されることがある。
-pub fn detect_ime_conflict(combo: &str) -> bool {
-    let lower = combo.to_lowercase();
-    let parts: Vec<&str> = lower.split('+').map(str::trim).collect();
-    if parts.len() < 2 {
-        return false;
-    }
-    let has_shift = parts.iter().any(|p| *p == "leftshift" || *p == "rightshift" || *p == "lshift" || *p == "rshift" || *p == "shift");
-    if !has_shift {
-        return false;
-    }
-    // Shift + 文字キー (a-z) または Shift + Space
-    let last = *parts.last().unwrap();
-    let is_letter = last.len() == 1 && last.chars().all(|c| c.is_ascii_alphabetic());
-    let is_space = last == "space";
-    is_letter || is_space
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::settings::ActionKind;
-
-    #[test]
-    fn ime_conflict_detection() {
-        assert!(detect_ime_conflict("leftshift+a"));
-        assert!(detect_ime_conflict("rightshift+space"));
-        assert!(detect_ime_conflict("shift+z"));
-        assert!(!detect_ime_conflict("leftcontrol+r"));
-        assert!(!detect_ime_conflict("leftmeta+leftcontrol+v"));
-        assert!(!detect_ime_conflict("escape"));
-        assert!(!detect_ime_conflict("leftoption"));
-    }
 
     #[test]
     fn bindings_to_registered_skips_invalid() {

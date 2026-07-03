@@ -2,16 +2,14 @@ use reqwest::RequestBuilder;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AuthKind {
+    #[default]
     Bearer,
-    ApiKeyHeader { header_name: String },
+    ApiKeyHeader {
+        header_name: String,
+    },
     None,
-}
-
-impl Default for AuthKind {
-    fn default() -> Self {
-        AuthKind::Bearer
-    }
 }
 
 pub fn apply_auth(builder: RequestBuilder, kind: &AuthKind, key: &str) -> RequestBuilder {

@@ -21,13 +21,17 @@ impl HistoryStore {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let conn = Connection::open(path)?;
         Self::init(&conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn open_in_memory() -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
         Self::init(&conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     fn init(conn: &Connection) -> anyhow::Result<()> {
@@ -78,7 +82,10 @@ impl HistoryStore {
     }
 
     pub fn clear(&self) -> anyhow::Result<()> {
-        self.conn.lock().unwrap().execute("DELETE FROM history", [])?;
+        self.conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM history", [])?;
         Ok(())
     }
 }

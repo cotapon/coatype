@@ -10,7 +10,7 @@ on:
 jobs:
   release:
     permissions:
-      contents: write  # GitHub Release の作成に必要
+      contents: write # GitHub Release の作成に必要
 
     strategy:
       fail-fast: false

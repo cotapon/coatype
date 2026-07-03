@@ -3,12 +3,19 @@ use crate::audio::recorder::{LevelCb, Recorder};
 use crate::config::settings::ProviderConfig;
 use crate::dictionary::replace::Dictionary;
 use crate::history::store::HistoryStore;
+use crate::util::lock_or_recover;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::task::JoinHandle;
 
 pub struct CurrentTask {
     pub join: JoinHandle<()>,
+    /// 採番された世代。完了時のクリーンアップが「自分が登録したタスク」の
+    /// ときだけ current_task を解放するための照合キー。これがないと、
+    /// 旧タスクの完了処理が後から登録された新タスクのハンドルを握り潰し、
+    /// Cancel が新タスクに効かなくなる。
+    pub gen: u64,
 }
 
 pub struct Pipeline {
@@ -24,6 +31,7 @@ pub struct Pipeline {
     pub input_device: Arc<Mutex<Option<String>>>,
     started_at: Mutex<Option<Instant>>,
     pub current_task: Mutex<Option<CurrentTask>>,
+    task_gen: AtomicU64,
 }
 
 impl Pipeline {
@@ -45,20 +53,26 @@ impl Pipeline {
             input_device: Arc::new(Mutex::new(input_device)),
             started_at: Mutex::new(None),
             current_task: Mutex::new(None),
+            task_gen: AtomicU64::new(0),
         }
+    }
+
+    /// current_task 用の世代番号を採番する。
+    pub fn next_task_gen(&self) -> u64 {
+        self.task_gen.fetch_add(1, Ordering::Relaxed)
     }
 
     // ── API キー更新 ──────────────────────────────────────────────
 
     pub fn update_api_key(&self, key: String) {
-        self.client.lock().unwrap().set_api_key(key);
+        lock_or_recover(&self.client).set_api_key(key);
     }
 
     // ── 入力デバイス更新 ──────────────────────────────────────────
 
     /// 選択中の入力デバイスを更新する。次回の録音開始から反映される (再起動不要)。
     pub fn update_input_device(&self, device: Option<String>) {
-        *self.input_device.lock().unwrap() = device;
+        *lock_or_recover(&self.input_device) = device;
     }
 
     // ── クライアント再構築 ───────────────────────────────────────
@@ -70,31 +84,34 @@ impl Pipeline {
             config.auth_kind.clone(),
             api_key,
         ));
-        *self.client.lock().unwrap() = new_client;
+        *lock_or_recover(&self.client) = new_client;
     }
 
     // ── 録音 / 処理 ───────────────────────────────────────────────
 
     pub fn start(&self, on_level: Option<LevelCb>) -> anyhow::Result<()> {
+        // 未設定のまま録音 → HTTP 401 で初めて失敗、という体験を避けるための事前ガード
+        if !lock_or_recover(&self.client).is_configured() {
+            anyhow::bail!(
+                "STT の設定が未完了です。設定画面でエンドポイントと API キーを確認してください"
+            );
+        }
         tracing::info!("recording: start");
-        let device = self.input_device.lock().unwrap().clone();
-        self.recorder.lock().unwrap().start(device.as_deref(), on_level)?;
-        *self.started_at.lock().unwrap() = Some(Instant::now());
+        let device = lock_or_recover(&self.input_device).clone();
+        lock_or_recover(&self.recorder).start(device.as_deref(), on_level)?;
+        *lock_or_recover(&self.started_at) = Some(Instant::now());
         Ok(())
     }
 
     pub async fn stop_and_process(&self) -> anyhow::Result<String> {
         tracing::info!("stop_and_process: acquiring recorder lock");
         let wav = {
-            let mut rec = self.recorder.lock().unwrap();
+            let mut rec = lock_or_recover(&self.recorder);
             tracing::info!("stop_and_process: lock acquired, calling stop()");
             rec.stop()
         };
         tracing::info!("stop_and_process: recorder.stop() returned");
-        let elapsed = self
-            .started_at
-            .lock()
-            .unwrap()
+        let elapsed = lock_or_recover(&self.started_at)
             .take()
             .map(|s| s.elapsed().as_millis() as i64)
             .unwrap_or(0);
@@ -120,11 +137,11 @@ impl Pipeline {
             return Ok(String::new());
         }
 
-        let translate = *self.translate.lock().unwrap();
-        let language = self.language.lock().unwrap().clone();
+        let translate = *lock_or_recover(&self.translate);
+        let language = lock_or_recover(&self.language).clone();
 
         tracing::info!("stt: request (translate={translate}, language={language})");
-        let client = self.client.lock().unwrap().clone();
+        let client = lock_or_recover(&self.client).clone();
         let raw = if translate {
             client.translate(&wav).await?
         } else {
@@ -132,14 +149,15 @@ impl Pipeline {
         };
         tracing::info!("stt: response {:?}", raw);
 
-        let after_dict = self.dict.lock().unwrap().apply(&raw);
+        let after_dict = lock_or_recover(&self.dict).apply(&raw);
         if after_dict != raw {
             tracing::debug!("dict: {:?} -> {:?}", raw, after_dict);
         }
 
         let final_text = after_dict;
 
-        self.history.insert(&final_text, &language, translate, elapsed)?;
+        self.history
+            .insert(&final_text, &language, translate, elapsed)?;
         Ok(final_text)
     }
 
@@ -153,10 +171,10 @@ impl Pipeline {
     /// (マイク権限やデバイス選択の問題を切り分けやすくするため)。
     pub async fn stop_and_transcribe_test(&self) -> anyhow::Result<String> {
         let wav = {
-            let mut rec = self.recorder.lock().unwrap();
+            let mut rec = lock_or_recover(&self.recorder);
             rec.stop()
         };
-        *self.started_at.lock().unwrap() = None;
+        *lock_or_recover(&self.started_at) = None;
 
         let sample_count = wav.len().saturating_sub(44) / 2;
         tracing::info!(
@@ -171,33 +189,25 @@ impl Pipeline {
             );
         }
 
-        let translate = *self.translate.lock().unwrap();
-        let language = self.language.lock().unwrap().clone();
-        let client = self.client.lock().unwrap().clone();
+        let translate = *lock_or_recover(&self.translate);
+        let language = lock_or_recover(&self.language).clone();
+        let client = lock_or_recover(&self.client).clone();
         let raw = if translate {
             client.translate(&wav).await?
         } else {
             client.transcribe(&wav, &language, None).await?
         };
         tracing::info!("test recording: stt result {:?}", raw);
-        Ok(self.dict.lock().unwrap().apply(&raw))
+        Ok(lock_or_recover(&self.dict).apply(&raw))
     }
 
     /// 録音を破棄し、処理中タスクを強制終了する。
     pub fn cancel(&self) {
-        self.recorder.lock().unwrap().stop();
-        *self.started_at.lock().unwrap() = None;
-        if let Some(task) = self.current_task.lock().unwrap().take() {
+        lock_or_recover(&self.recorder).stop();
+        *lock_or_recover(&self.started_at) = None;
+        if let Some(task) = lock_or_recover(&self.current_task).take() {
             task.join.abort();
         }
-    }
-
-    /// 最後の文字起こし結果を返す。履歴が空なら None。
-    pub fn last_transcription(&self) -> Option<String> {
-        self.history
-            .list(1)
-            .ok()
-            .and_then(|items| items.into_iter().next().map(|i| i.text))
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::util::lock_or_recover;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::{WavSpec, WavWriter};
 use std::io::Cursor;
@@ -36,19 +37,23 @@ impl Recorder {
     /// `None` の場合は最初からデフォルトデバイスを使う。
     pub fn start(&mut self, device: Option<&str>, on_level: Option<LevelCb>) -> anyhow::Result<()> {
         let host = cpal::default_host();
-        let device = match device {
-            Some(name) => {
-                let found = host
-                    .input_devices()?
-                    .find(|d| d.name().map(|n| n == name).unwrap_or(false));
-                if found.is_none() {
+        let available: Vec<String> = host
+            .input_devices()?
+            .filter_map(|d| d.name().ok())
+            .collect();
+        let device = match resolve_device_name(&available, device) {
+            Some(name) => host
+                .input_devices()?
+                .find(|d| d.name().map(|n| n == name).unwrap_or(false))
+                .or_else(|| host.default_input_device()),
+            None => {
+                if let Some(name) = device {
                     tracing::warn!(
                         "recorder: requested input device '{name}' not found, falling back to default"
                     );
                 }
-                found.or_else(|| host.default_input_device())
+                host.default_input_device()
             }
-            None => host.default_input_device(),
         };
         let device = device.ok_or_else(|| anyhow::anyhow!("no input device"))?;
         let config = device.default_input_config()?;
@@ -62,7 +67,7 @@ impl Recorder {
         );
 
         let samples = Arc::clone(&self.samples);
-        samples.lock().unwrap().clear();
+        lock_or_recover(&samples).clear();
 
         // ~30fps 相当でレベルを通知するためのサンプル数 (モノラル換算の概算)。
         let level_step = (self.sample_rate as usize / 30).max(1);
@@ -73,7 +78,7 @@ impl Recorder {
                 device.build_input_stream(
                     &config.into(),
                     move |data: &[f32], _| {
-                        let mut buf = samples.lock().unwrap();
+                        let mut buf = lock_or_recover(&samples);
                         buf.extend(
                             data.iter()
                                 .map(|&s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16),
@@ -90,7 +95,7 @@ impl Recorder {
                 device.build_input_stream(
                     &config.into(),
                     move |data: &[i16], _| {
-                        samples.lock().unwrap().extend_from_slice(data);
+                        lock_or_recover(&samples).extend_from_slice(data);
                         acc.push_iter(data.iter().map(|&s| s as f64 / i16::MAX as f64));
                     },
                     |err| tracing::error!("stream error: {err}"),
@@ -110,13 +115,17 @@ impl Recorder {
         // CFRunLoop を持たない tokio ワーカースレッドではデッドロックする。
         // 別スレッドで drop することで回避する。
         tracing::debug!("recorder: locking samples");
-        let samples = self.samples.lock().unwrap().clone();
+        let samples = lock_or_recover(&self.samples).clone();
         let rate = self.sample_rate;
-        tracing::debug!("recorder: {} samples collected, releasing stream on background thread", samples.len());
+        tracing::debug!(
+            "recorder: {} samples collected, releasing stream on background thread",
+            samples.len()
+        );
         if let Some(stream) = self.stream.take() {
             // cpal::Stream は !Send だが、CoreAudio スレッドから離れた
             // スレッドで drop するだけなので実質安全。
-            struct SendStream(cpal::Stream);
+            // フィールドは読まれないが、所有権を移して Drop させるために必要。
+            struct SendStream(#[allow(dead_code)] cpal::Stream);
             unsafe impl Send for SendStream {}
             let s = SendStream(stream);
             std::thread::spawn(move || drop(s));
@@ -174,11 +183,13 @@ impl LevelAccumulator {
 /// 名前取得に失敗したデバイスはスキップし、重複は取り除く。
 pub fn list_input_device_names() -> anyhow::Result<Vec<String>> {
     let host = cpal::default_host();
-    let mut names: Vec<String> = host
+    // Vec::dedup は隣接する重複しか除去しないため、順序を保ちつつ HashSet で重複を落とす
+    let mut seen = std::collections::HashSet::new();
+    let names: Vec<String> = host
         .input_devices()?
         .filter_map(|d| d.name().ok())
+        .filter(|n| seen.insert(n.clone()))
         .collect();
-    names.dedup();
     Ok(names)
 }
 
@@ -223,7 +234,10 @@ mod tests {
 
     #[test]
     fn resolve_device_name_returns_requested_when_available() {
-        let available = vec!["Built-in Microphone".to_string(), "USB Microphone".to_string()];
+        let available = vec![
+            "Built-in Microphone".to_string(),
+            "USB Microphone".to_string(),
+        ];
         assert_eq!(
             resolve_device_name(&available, Some("USB Microphone")),
             Some("USB Microphone".to_string())
