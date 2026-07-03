@@ -31,6 +31,19 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "transparent": true
+      },
+      {
+        "label": "update-dialog",
+        "title": "",
+        "width": 360,
+        "height": 460,
+        "visible": false,
+        "resizable": false,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
       }
     ],
     "security": {

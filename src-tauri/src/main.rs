@@ -16,8 +16,6 @@ use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::MessageDialogButtons;
-use tauri_plugin_updater::UpdaterExt;
 
 fn main() {
     dotenvy::dotenv().ok();
@@ -45,6 +43,13 @@ fn main() {
 
             let settings = Settings::load(&settings_path);
             let dict = Dictionary::load(&dict_path);
+
+            // visible:false の設定ウィンドウが起動直後に getSettings/getDictionary を invoke するため、
+            // HistoryStore::open / keychain 照会 / reqwest 構築 (重い処理) より先に manage して
+            // Windows WebView2 との起動レースを防ぐ。
+            app.manage(SettingsPath(settings_path));
+            app.manage(DictPath(dict_path));
+
             let history = Arc::new(HistoryStore::open(&db_path)?);
 
             let stt_key = keychain::resolve_api_key_for(ACCOUNT_COMMON).unwrap_or_default();
@@ -74,8 +79,6 @@ fn main() {
             let paused_arc = Arc::new(AtomicBool::new(false));
 
             app.manage(pipeline.clone());
-            app.manage(SettingsPath(settings_path));
-            app.manage(DictPath(dict_path));
             app.manage(ListenerState(active_shortcut_state.clone()));
             app.manage(ListenerBindings(bindings_arc.clone()));
             app.manage(ListenerPaused(paused_arc.clone()));
@@ -220,13 +223,8 @@ fn main() {
                 }
             });
 
-            // 起動時アップデートチェック(非同期・失敗時は無通知)
-            let update_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = check_and_prompt_update(update_handle).await {
-                    tracing::warn!("アップデートチェック失敗: {e}");
-                }
-            });
+            // 起動時アップデートチェックは update-dialog ウィンドウ(React)が担当する。
+            // visible:false で起動し、新バージョンがあれば show()、なければ close() する。
 
             Ok(())
         })
@@ -248,6 +246,7 @@ fn main() {
             coatype_lib::commands::start_test_recording,
             coatype_lib::commands::stop_test_recording,
             coatype_lib::commands::open_url,
+            coatype_lib::commands::get_platform,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CoAType");
@@ -378,57 +377,3 @@ fn spawn_stop_and_process(
     *pipeline.current_task.lock().unwrap() = Some(CurrentTask { join });
 }
 
-/// 起動時アップデートチェック。
-/// 新バージョンがあれば tauri_plugin_dialog でユーザーに確認し、
-/// 同意したらダウンロード → インストール → 再起動する。
-/// ネットワーク不通・pubkey 未設定など失敗しても呼び出し元で warn ログのみ。
-async fn check_and_prompt_update(handle: tauri::AppHandle) -> anyhow::Result<()> {
-    use tauri_plugin_dialog::DialogExt;
-
-    let updater = handle.updater()?;
-    let Some(update) = updater.check().await? else {
-        tracing::debug!("アップデートなし");
-        return Ok(());
-    };
-
-    let version = update.version.clone();
-    let body = update.body.clone().unwrap_or_default();
-    let msg = if body.is_empty() {
-        format!("CoAType バージョン {} が利用可能です。今すぐ更新しますか？", version)
-    } else {
-        format!("CoAType バージョン {} が利用可能です。\n\n{}\n\n今すぐ更新しますか？", version, body)
-    };
-
-    // oneshot チャンネルでダイアログの非同期コールバックを await に変換
-    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-    handle
-        .dialog()
-        .message(msg)
-        .title("アップデートが利用可能です")
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "今すぐ更新".to_string(),
-            "後で".to_string(),
-        ))
-        .show(move |answer| {
-            let _ = tx.send(answer);
-        });
-
-    if rx.await.unwrap_or(false) {
-        tracing::info!("アップデートダウンロード開始: v{}", version);
-        update
-            .download_and_install(
-                |downloaded, total| {
-                    if let Some(t) = total {
-                        tracing::debug!("ダウンロード: {}/{} bytes", downloaded, t);
-                    }
-                },
-                || {
-                    tracing::info!("ダウンロード完了、インストール中...");
-                },
-            )
-            .await?;
-        handle.restart();
-    }
-
-    Ok(())
-}

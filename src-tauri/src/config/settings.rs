@@ -90,6 +90,48 @@ fn detect_system_language() -> String {
         .unwrap_or_else(|| "ja".to_string())
 }
 
+/// OS ごとのデフォルトショートカット。
+/// macOS: 右Option (Key::AltGr)。Windows: 右Ctrl (Key::ControlRight)。
+/// いずれも「右側の、単独では滅多に使わない修飾キー」を Push-to-Talk トリガーにする思想で選定。
+/// Windows で左右非対称の Meta(Winキー) を避けるのは、単独押下でスタートメニューが開き
+/// Win+V 等の OS 予約コンボと衝突するため。
+#[cfg(target_os = "windows")]
+fn default_combo() -> &'static str {
+    "rightcontrol"
+}
+#[cfg(not(target_os = "windows"))]
+fn default_combo() -> &'static str {
+    "rightoption"
+}
+
+/// combo 文字列を実行 OS に合わせて正規化する。
+///
+/// Mac で作成された設定 (leftmeta/rightmeta = Command, fn) が Windows に持ち込まれた場合、
+/// rdev の Windows バックエンドには MetaRight/Function の keycode が存在せず、
+/// また MetaLeft (Winキー) は単独押下でスタートメニューを開いてしまい実用にならない。
+/// そのため Windows ロード時のみ Meta 系を Ctrl 系へ寄せ、fn は除去する。
+/// 逆方向 (Windows → macOS) は変換しない: Ctrl/Alt はどちらの OS でも意図通りに機能するため、
+/// ユーザーが明示的に選んだキーを強制的に書き換える必要がない。
+///
+/// テスト容易性のため OS 判定 (`is_windows`) を引数として受け取る純粋関数にしている。
+fn normalize_combo_for(combo: &str, is_windows: bool) -> String {
+    if !is_windows {
+        return combo.to_string();
+    }
+    combo
+        .split('+')
+        .map(|p| p.trim().to_lowercase())
+        .map(|p| match p.as_str() {
+            "leftmeta" | "lmeta" | "lcmd" | "leftcmd" | "metacmd" => "leftcontrol".to_string(),
+            "rightmeta" | "rmeta" | "rcmd" | "rightcmd" => "rightcontrol".to_string(),
+            "fn" | "function" => String::new(),
+            other => other.to_string(),
+        })
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 impl Default for Settings {
     fn default() -> Self {
         let base = Self::default_base();
@@ -98,7 +140,7 @@ impl Default for Settings {
             bindings: vec![KeyBinding {
                 id: "default-0".to_string(),
                 action: ActionKind::StartRecord,
-                combo: "rightoption".to_string(),
+                combo: default_combo().to_string(),
                 enabled: true,
             }],
             translate_mode: false,
@@ -139,7 +181,7 @@ impl Settings {
 
         // 旧 shortcut/trigger_mode を bindings に変換
         if self.bindings.is_empty() {
-            let combo = self.shortcut.take().unwrap_or_else(|| "rightoption".to_string());
+            let combo = self.shortcut.take().unwrap_or_else(|| default_combo().to_string());
             let action = match self.trigger_mode.take().unwrap_or(TriggerMode::PushToTalk) {
                 TriggerMode::PushToTalk => ActionKind::StartRecord,
                 TriggerMode::Toggle => ActionKind::HandsFree,
@@ -154,6 +196,20 @@ impl Settings {
             // bindings が既にある場合は旧フィールドを消すだけ
             self.shortcut = None;
             self.trigger_mode = None;
+        }
+
+        // OS 間で持ち込まれた combo (Mac の Meta/fn 等) を実行 OS に合わせて正規化する。
+        let is_windows = cfg!(target_os = "windows");
+        for b in &mut self.bindings {
+            let normalized = normalize_combo_for(&b.combo, is_windows);
+            if normalized != b.combo {
+                tracing::warn!(
+                    old = %b.combo,
+                    new = %normalized,
+                    "combo を実行 OS 向けに正規化しました"
+                );
+                b.combo = normalized;
+            }
         }
     }
 
@@ -210,9 +266,54 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.language, "ja");
         assert_eq!(s.bindings.len(), 1);
-        assert_eq!(s.bindings[0].combo, "rightoption");
+        assert_eq!(s.bindings[0].combo, default_combo());
         assert!(matches!(s.bindings[0].action, ActionKind::StartRecord));
         assert_eq!(s.stt.model, "");
+    }
+
+    #[test]
+    fn default_combo_matches_current_platform() {
+        // macOS: 右Option、Windows: 右Ctrl。ビルド対象 OS に応じて分岐すること。
+        if cfg!(target_os = "windows") {
+            assert_eq!(default_combo(), "rightcontrol");
+        } else {
+            assert_eq!(default_combo(), "rightoption");
+        }
+    }
+
+    #[test]
+    fn normalize_combo_for_windows_maps_meta_to_control_and_drops_fn() {
+        assert_eq!(normalize_combo_for("leftmeta+v", true), "leftcontrol+v");
+        assert_eq!(normalize_combo_for("rightmeta", true), "rightcontrol");
+        assert_eq!(normalize_combo_for("fn+space", true), "space");
+        // Windows でも既に対応済みのキーはそのまま
+        assert_eq!(normalize_combo_for("rightcontrol", true), "rightcontrol");
+        assert_eq!(normalize_combo_for("leftoption", true), "leftoption");
+    }
+
+    #[test]
+    fn normalize_combo_for_non_windows_is_identity() {
+        assert_eq!(normalize_combo_for("leftmeta+v", false), "leftmeta+v");
+        assert_eq!(normalize_combo_for("fn", false), "fn");
+        assert_eq!(normalize_combo_for("rightoption", false), "rightoption");
+    }
+
+    #[test]
+    fn migrate_legacy_normalizes_combo_for_current_platform() {
+        let json = r#"{
+            "language": "ja",
+            "translate_mode": false,
+            "bindings": [
+                {"id": "b1", "action": "start_record", "combo": "leftmeta+v", "enabled": true}
+            ]
+        }"#;
+        let mut s: Settings = serde_json::from_str(json).unwrap();
+        s.migrate_legacy();
+        if cfg!(target_os = "windows") {
+            assert_eq!(s.bindings[0].combo, "leftcontrol+v");
+        } else {
+            assert_eq!(s.bindings[0].combo, "leftmeta+v");
+        }
     }
 
     #[test]

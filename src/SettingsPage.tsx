@@ -269,6 +269,7 @@ export function SettingsPage() {
   const [listenerState, setListenerState] = useState<ActiveShortcut | null>(null);
   const [banner, setBanner] = useState<{ type: "saved" | "error"; text: string } | null>(null);
   const [appVersion, setAppVersion] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const settingsLoaded = useRef(false);
   const dictLoaded = useRef(false);
@@ -280,13 +281,20 @@ export function SettingsPage() {
     hasApiKey().then(setKeyExists).catch(console.error);
   };
 
-  useEffect(() => {
+  // 設定の初期ロード。invoke.ts の invokeWithRetry により起動レースに対して耐性があるが、
+  // 最終的に失敗した場合はエラーUIを出してユーザーが再試行できるようにする。
+  const loadSettings = () => {
+    setLoadError(null);
     getSettings()
       .then((s) => {
         setSettings(s);
         setInitialSettings(s);
       })
-      .catch(console.error);
+      .catch((e) => setLoadError(String(e)));
+  };
+
+  useEffect(() => {
+    loadSettings();
     getDictionary().then(setDict).catch(console.error);
     refreshKeyStatus();
     checkAccessibility().then(setAccessibilityOk).catch(console.error);
@@ -372,6 +380,20 @@ export function SettingsPage() {
   };
 
   if (!settings) {
+    if (loadError) {
+      return (
+        <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-background text-sm text-foreground">
+          <p className="text-danger">設定の読み込みに失敗しました</p>
+          <p className="max-w-xs break-all text-center text-xs text-muted">{loadError}</p>
+          <button
+            onClick={loadSettings}
+            className="rounded-md bg-accent px-4 py-2 text-sm text-white hover:opacity-80"
+          >
+            再試行
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-background text-sm text-muted">
         読み込み中…
