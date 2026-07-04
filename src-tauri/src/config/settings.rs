@@ -225,24 +225,8 @@ impl Settings {
     }
 
     pub fn load(path: &Path) -> Self {
-        let existing: Option<Settings> = match std::fs::read_to_string(path) {
-            Ok(raw) => match serde_json::from_str(&raw) {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    // 破損ファイルをデフォルトで上書き保存すると設定が完全消失するため、
-                    // .bak に退避してから作り直す (退避失敗しても続行はする)
-                    let backup = backup_path(path);
-                    tracing::warn!(
-                        "settings: {} のパースに失敗 ({e})。{} に退避してデフォルトで再作成します",
-                        path.display(),
-                        backup.display()
-                    );
-                    let _ = std::fs::rename(path, &backup);
-                    None
-                }
-            },
-            Err(_) => None,
-        };
+        // 破損ファイルは .bak に退避してから作り直す (退避失敗しても続行はする)
+        let existing: Option<Settings> = crate::util::load_json_with_corruption_backup(path);
         let mut s = match existing {
             Some(s) => s,
             None => {
@@ -263,16 +247,6 @@ impl Settings {
         }
         crate::util::atomic_write(path, serde_json::to_string_pretty(self)?.as_bytes())
     }
-}
-
-/// `settings.json` → `settings.json.bak`
-fn backup_path(path: &Path) -> std::path::PathBuf {
-    let mut name = path
-        .file_name()
-        .map(|n| n.to_os_string())
-        .unwrap_or_else(|| std::ffi::OsString::from("settings.json"));
-    name.push(".bak");
-    path.with_file_name(name)
 }
 
 #[cfg(test)]

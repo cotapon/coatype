@@ -408,16 +408,27 @@ fn spawn_stop_and_process(
                 let _ = handle_task.emit("error", e.to_string());
             }
         }
-        let _ = handle_task.emit("recording-state", "idle");
-        if let Some(w) = handle_task.get_webview_window("overlay") {
-            let _ = w.hide();
-        }
         // タスク完了時に current_task を解放する。ただし自分が登録した世代の
         // ときだけ。無条件に None にすると、後から登録された新タスクのハンドルを
         // 握り潰して Cancel が効かなくなる。
-        let mut cur = lock_or_recover(&pipeline_task.current_task);
-        if cur.as_ref().map(|t| t.gen) == Some(gen) {
-            *cur = None;
+        let is_latest = {
+            let mut cur = lock_or_recover(&pipeline_task.current_task);
+            if cur.as_ref().map(|t| t.gen) == Some(gen) {
+                *cur = None;
+                true
+            } else {
+                false
+            }
+        };
+        // UI の idle 化とオーバーレイ非表示も、自分が最新のタスクで、かつ新しい
+        // 録音が始まっていないときだけ行う。無条件に行うと、旧タスクの完了処理が
+        // 進行中の新録音のオーバーレイを消してしまう (世代照合だけでは「新録音は
+        // 開始済みだが停止前でタスク未登録」の窓を守れないため録音中判定も見る)。
+        if is_latest && !pipeline_task.is_recording() {
+            let _ = handle_task.emit("recording-state", "idle");
+            if let Some(w) = handle_task.get_webview_window("overlay") {
+                let _ = w.hide();
+            }
         }
     });
 

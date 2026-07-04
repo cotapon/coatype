@@ -1,5 +1,6 @@
 use crate::api::auth::{apply_auth, AuthKind};
 use crate::api::error::ApiError;
+use crate::util::lock_or_recover;
 use reqwest::multipart::{Form, Part};
 use std::sync::{Arc, Mutex};
 
@@ -32,7 +33,7 @@ impl WhisperClient {
     }
 
     pub fn set_api_key(&self, key: String) {
-        *self.api_key.lock().unwrap() = key;
+        *lock_or_recover(&self.api_key) = key;
     }
 
     /// STT が使える状態かを返す。録音前の事前チェックで弾くために使う。
@@ -44,7 +45,7 @@ impl WhisperClient {
         }
         match self.auth_kind {
             AuthKind::None => true,
-            _ => !self.api_key.lock().unwrap().trim().is_empty(),
+            _ => !lock_or_recover(&self.api_key).trim().is_empty(),
         }
     }
 
@@ -86,7 +87,7 @@ impl WhisperClient {
     async fn post(&self, path: &str, form: Form) -> Result<String, ApiError> {
         let url = format!("{}{}", self.base, path);
         tracing::debug!("whisper: POST {url}");
-        let key = self.api_key.lock().unwrap().clone();
+        let key = lock_or_recover(&self.api_key).clone();
         let resp = apply_auth(self.http.post(&url), &self.auth_kind, &key)
             .multipart(form)
             .send()

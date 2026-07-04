@@ -24,10 +24,9 @@ impl Dictionary {
     }
 
     pub fn load(path: &std::path::Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        // 破損時は .bak に退避して空辞書で再出発する (settings と同じ対策)。
+        // 握りつぶすと、次の辞書編集の自動保存が破損原本を上書きして登録内容が消える
+        crate::util::load_json_with_corruption_backup(path).unwrap_or_default()
     }
 
     /// incoming のエントリを追記マージする。
@@ -168,6 +167,20 @@ mod tests {
         assert_eq!(dict.entries[1].from, "y");
         assert_eq!(dict.entries[1].to, "Y2");
         assert_eq!(dict.entries[2].from, "z");
+    }
+
+    #[test]
+    fn load_backs_up_corrupted_file_and_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dictionary.json");
+        std::fs::write(&path, "{ broken").unwrap();
+
+        let dict = Dictionary::load(&path);
+
+        assert!(dict.entries.is_empty());
+        let backup = dir.path().join("dictionary.json.bak");
+        assert!(backup.exists(), "破損辞書が .bak に退避されること");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{ broken");
     }
 
     #[test]

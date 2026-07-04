@@ -5,6 +5,7 @@ use crate::history::store::HistoryItem;
 use crate::pipeline::Pipeline;
 use crate::secrets::keychain;
 use crate::shortcut::listener::{parse_shortcut, RegisteredBinding};
+use crate::util::lock_or_recover;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,8 +46,8 @@ pub async fn save_settings(
 ) -> Result<(), String> {
     settings.save(&path.0).map_err(|e| e.to_string())?;
     let p: &Pipeline = &pipeline;
-    *p.translate.lock().unwrap() = settings.translate_mode;
-    *p.language.lock().unwrap() = settings.language.clone();
+    *lock_or_recover(&p.translate) = settings.translate_mode;
+    *lock_or_recover(&p.language) = settings.language.clone();
     p.update_input_device(settings.input_device.clone());
 
     let stt_key = keychain::resolve_api_key().unwrap_or_default();
@@ -54,7 +55,7 @@ pub async fn save_settings(
 
     // キーバインドをホットリロード (リスナー再起動なし)
     let new_registered = bindings_to_registered(&settings.bindings);
-    *bindings_state.0.lock().unwrap() = new_registered;
+    *lock_or_recover(&bindings_state.0) = new_registered;
 
     show_overlay_state
         .0
@@ -66,7 +67,7 @@ pub async fn save_settings(
 #[tauri::command]
 pub async fn get_dictionary(pipeline: State<'_, Arc<Pipeline>>) -> Result<Dictionary, String> {
     let p: &Pipeline = &pipeline;
-    Ok(p.dict.lock().unwrap().clone())
+    Ok(lock_or_recover(&p.dict).clone())
 }
 
 #[tauri::command]
@@ -77,7 +78,7 @@ pub async fn save_dictionary(
 ) -> Result<(), String> {
     dict.save(&dict_path.0).map_err(|e| e.to_string())?;
     let p: &Pipeline = &pipeline;
-    *p.dict.lock().unwrap() = dict;
+    *lock_or_recover(&p.dict) = dict;
     Ok(())
 }
 
@@ -91,11 +92,11 @@ pub async fn import_dictionary(
     let incoming = crate::dictionary::io::detect_and_parse(&content).map_err(|e| e.to_string())?;
 
     let p: &Pipeline = &pipeline;
-    let mut dict = p.dict.lock().unwrap().clone();
+    let mut dict = lock_or_recover(&p.dict).clone();
     dict.merge(incoming);
 
     dict.save(&dict_path.0).map_err(|e| e.to_string())?;
-    *p.dict.lock().unwrap() = dict.clone();
+    *lock_or_recover(&p.dict) = dict.clone();
 
     Ok(dict)
 }
@@ -106,7 +107,7 @@ pub async fn export_dictionary(
     pipeline: State<'_, Arc<Pipeline>>,
 ) -> Result<(), String> {
     let p: &Pipeline = &pipeline;
-    let dict = p.dict.lock().unwrap().clone();
+    let dict = lock_or_recover(&p.dict).clone();
     let csv = crate::dictionary::io::to_csv(&dict).map_err(|e| e.to_string())?;
     std::fs::write(&path, csv).map_err(|e| e.to_string())?;
     Ok(())
@@ -153,7 +154,7 @@ pub async fn open_accessibility_settings() {
 pub async fn active_shortcut(
     listener_state: State<'_, ListenerState>,
 ) -> Result<ActiveShortcut, String> {
-    Ok(listener_state.0.lock().unwrap().clone())
+    Ok(lock_or_recover(&listener_state.0).clone())
 }
 
 /// 録音テスト開始: マイク録音のみ開始する (グローバルショートカットの録音とは独立)。
@@ -190,7 +191,7 @@ pub async fn start_mic_test(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     // 冪等化: 既存のテストストリームが残っていれば先に破棄する。
-    let _ = mic_test.0.lock().unwrap().stop();
+    let _ = lock_or_recover(&mic_test.0).stop();
 
     let (level_tx, level_rx) = std::sync::mpsc::channel::<f32>();
     let on_level: crate::audio::recorder::LevelCb = Box::new(move |lvl: f32| {
@@ -215,7 +216,7 @@ pub async fn start_mic_test(
 /// start_mic_test 内の emit スレッドは自然終了する。
 #[tauri::command]
 pub async fn stop_mic_test(mic_test: State<'_, MicTest>) -> Result<(), String> {
-    let _ = mic_test.0.lock().unwrap().stop();
+    let _ = lock_or_recover(&mic_test.0).stop();
     Ok(())
 }
 

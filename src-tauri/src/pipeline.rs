@@ -62,6 +62,12 @@ impl Pipeline {
         self.task_gen.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// 録音中 (start 済みで stop/cancel 前) かどうか。
+    /// 旧タスクの完了処理が進行中の新録音の UI を巻き戻さないための判定に使う。
+    pub fn is_recording(&self) -> bool {
+        lock_or_recover(&self.started_at).is_some()
+    }
+
     // ── API キー更新 ──────────────────────────────────────────────
 
     pub fn update_api_key(&self, key: String) {

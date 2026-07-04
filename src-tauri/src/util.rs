@@ -42,7 +42,28 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     }
 }
 
-fn sibling_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+/// JSON ファイルを読み込んでデシリアライズする。ファイルが無ければ None。
+/// パースに失敗した場合は破損ファイルを `<name>.bak` に退避して None を返す。
+/// 退避しないと、次の保存 (atomic_write) が破損原本をバックアップなしに上書きし、
+/// 復旧余地のあったユーザーデータごと消えてしまう (settings と辞書で共通の対策)。
+pub fn load_json_with_corruption_backup<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    match serde_json::from_str(&raw) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            let backup = sibling_with_suffix(path, ".bak");
+            tracing::warn!(
+                "{} のパースに失敗 ({e})。{} に退避してデフォルトで再作成します",
+                path.display(),
+                backup.display()
+            );
+            let _ = std::fs::rename(path, &backup);
+            None
+        }
+    }
+}
+
+pub(crate) fn sibling_with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path
         .file_name()
         .map(|n| n.to_os_string())

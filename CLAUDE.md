@@ -148,4 +148,4 @@ tracing ログ (`RUST_LOG=debug npm run tauri dev`) でキーイベントを確�
 
 - `save_settings` はリスナーを再起動しない。ショートカットキーの変更はアプリ再起動で反映される (将来的に `CFRunLoopStop` + 再 spawn で対応可能だが現状は未実装)
 - 辞書補正は `dictionary/replace.rs` の完全一致置換のみ。LLM 補正は未実装 (`translate_model` フィールドだけ Settings に存在し、UI も未実装)
-- `cargo test` はすべて mockito を使った HTTP モックテスト。実際の API を叩くテストはない
+- `cargo test` は mockito による HTTP モックと tempfile によるファイル I/O のユニットテスト。実際の API を叩くテストはない

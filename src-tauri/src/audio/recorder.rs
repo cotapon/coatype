@@ -37,22 +37,26 @@ impl Recorder {
     /// `None` の場合は最初からデフォルトデバイスを使う。
     pub fn start(&mut self, device: Option<&str>, on_level: Option<LevelCb>) -> anyhow::Result<()> {
         let host = cpal::default_host();
-        let available: Vec<String> = host
-            .input_devices()?
-            .filter_map(|d| d.name().ok())
-            .collect();
-        let device = match resolve_device_name(&available, device) {
-            Some(name) => host
-                .input_devices()?
-                .find(|d| d.name().map(|n| n == name).unwrap_or(false))
-                .or_else(|| host.default_input_device()),
-            None => {
-                if let Some(name) = device {
+        // 録音開始のホットパスなので、デバイス列挙は名前指定時に1回だけ行う
+        // (デフォルトマイク使用時は列挙しない)
+        let device = match device {
+            None => host.default_input_device(),
+            Some(requested) => {
+                let devices: Vec<cpal::Device> = host.input_devices()?.collect();
+                let names: Vec<String> = devices
+                    .iter()
+                    .map(|d| d.name().unwrap_or_default())
+                    .collect();
+                let found = resolve_device_name(&names, Some(requested)).and_then(|name| {
+                    let idx = names.iter().position(|n| *n == name)?;
+                    devices.into_iter().nth(idx)
+                });
+                if found.is_none() {
                     tracing::warn!(
-                        "recorder: requested input device '{name}' not found, falling back to default"
+                        "recorder: requested input device '{requested}' not found, falling back to default"
                     );
                 }
-                host.default_input_device()
+                found.or_else(|| host.default_input_device())
             }
         };
         let device = device.ok_or_else(|| anyhow::anyhow!("no input device"))?;

@@ -119,7 +119,10 @@ export function SettingsPage() {
   };
 
   const settingsLoaded = useRef(false);
-  const dictLoaded = useRef(false);
+  // 直近にバックエンドからロードした辞書オブジェクト。自動保存の effect が
+  // 「ロード反映による dict 変更」をユーザー編集と区別するために参照する
+  // (dict の初期値が非 null のため、ロードだけで保存とインジケータが誤発火していた)
+  const lastLoadedDict = useRef<Dictionary | null>(null);
 
   const refreshListenerState = () => activeShortcut().then(setListenerState).catch(console.error);
 
@@ -147,7 +150,10 @@ export function SettingsPage() {
   useEffect(() => {
     loadSettings();
     getDictionary()
-      .then(setDict)
+      .then((d) => {
+        lastLoadedDict.current = d;
+        setDict(d);
+      })
       .catch((e) => flash("error", `辞書の読み込みに失敗しました: ${e}`));
     refreshKeyStatus();
     checkAccessibility().then(setAccessibilityOk).catch(console.error);
@@ -197,12 +203,10 @@ export function SettingsPage() {
     return () => clearTimeout(t);
   }, [settings]);
 
-  // 辞書の自動保存
+  // 辞書の自動保存。ロード完了前 (lastLoadedDict が null) とロード反映そのもの
+  // (dict がロード結果と同一参照) では保存しない — ユーザー編集による変更のみ保存する
   useEffect(() => {
-    if (!dictLoaded.current) {
-      dictLoaded.current = true;
-      return;
-    }
+    if (!lastLoadedDict.current || dict === lastLoadedDict.current) return;
     const t = setTimeout(() => {
       setSaveState("saving");
       saveDictionary(dict)
@@ -1741,11 +1745,17 @@ function DictRegisterPopover({
   );
 }
 
+// Formatter の生成はロケール解決を伴い重いため、レンダーごとに作らず1回だけ生成する
+const CREATED_AT_FORMAT = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
 /** SQLite の "YYYY-MM-DD HH:MM:SS" (UTC) をローカル時刻の表記に整形する。パースできなければ原文のまま返す。 */
 function formatCreatedAt(createdAt: string): string {
   const d = new Date(createdAt.replace(" ", "T") + "Z");
   if (Number.isNaN(d.getTime())) return createdAt;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d);
+  return CREATED_AT_FORMAT.format(d);
 }
 
 function HistoryPane({
