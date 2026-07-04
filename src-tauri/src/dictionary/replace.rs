@@ -24,10 +24,9 @@ impl Dictionary {
     }
 
     pub fn load(path: &std::path::Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        // 破損時は .bak に退避して空辞書で再出発する (settings と同じ対策)。
+        // 握りつぶすと、次の辞書編集の自動保存が破損原本を上書きして登録内容が消える
+        crate::util::load_json_with_corruption_backup(path).unwrap_or_default()
     }
 
     /// incoming のエントリを追記マージする。
@@ -37,7 +36,8 @@ impl Dictionary {
     pub fn merge(&mut self, incoming: Vec<Entry>) {
         use std::collections::HashMap;
         // from -> entries 内インデックス のマップを構築
-        let mut index: HashMap<String, usize> = self.entries
+        let mut index: HashMap<String, usize> = self
+            .entries
             .iter()
             .enumerate()
             .map(|(i, e)| (e.from.clone(), i))
@@ -63,8 +63,7 @@ impl Dictionary {
         if let Some(p) = path.parent() {
             std::fs::create_dir_all(p)?;
         }
-        std::fs::write(path, serde_json::to_string_pretty(self)?)?;
-        Ok(())
+        crate::util::atomic_write(path, serde_json::to_string_pretty(self)?.as_bytes())
     }
 }
 
@@ -76,8 +75,14 @@ mod tests {
     fn replaces_entries_in_order() {
         let dict = Dictionary {
             entries: vec![
-                Entry { from: "おーぷんえーあい".into(), to: "OpenAI".into() },
-                Entry { from: "りらいとする".into(), to: "rewrite".into() },
+                Entry {
+                    from: "おーぷんえーあい".into(),
+                    to: "OpenAI".into(),
+                },
+                Entry {
+                    from: "りらいとする".into(),
+                    to: "rewrite".into(),
+                },
             ],
         };
         let out = dict.apply("おーぷんえーあいはりらいとするのが得意だ");
@@ -93,11 +98,15 @@ mod tests {
     #[test]
     fn merge_appends_new_entries() {
         let mut dict = Dictionary {
-            entries: vec![Entry { from: "a".into(), to: "A".into() }],
+            entries: vec![Entry {
+                from: "a".into(),
+                to: "A".into(),
+            }],
         };
-        dict.merge(vec![
-            Entry { from: "b".into(), to: "B".into() },
-        ]);
+        dict.merge(vec![Entry {
+            from: "b".into(),
+            to: "B".into(),
+        }]);
         assert_eq!(dict.entries.len(), 2);
         assert_eq!(dict.entries[1].from, "b");
         assert_eq!(dict.entries[1].to, "B");
@@ -107,13 +116,20 @@ mod tests {
     fn merge_overwrites_existing_from() {
         let mut dict = Dictionary {
             entries: vec![
-                Entry { from: "a".into(), to: "OLD".into() },
-                Entry { from: "b".into(), to: "B".into() },
+                Entry {
+                    from: "a".into(),
+                    to: "OLD".into(),
+                },
+                Entry {
+                    from: "b".into(),
+                    to: "B".into(),
+                },
             ],
         };
-        dict.merge(vec![
-            Entry { from: "a".into(), to: "NEW".into() },
-        ]);
+        dict.merge(vec![Entry {
+            from: "a".into(),
+            to: "NEW".into(),
+        }]);
         // 既存エントリ数は変わらない
         assert_eq!(dict.entries.len(), 2);
         // "a" の to が上書きされている
@@ -126,13 +142,25 @@ mod tests {
     fn merge_preserves_order_and_appends() {
         let mut dict = Dictionary {
             entries: vec![
-                Entry { from: "x".into(), to: "X".into() },
-                Entry { from: "y".into(), to: "Y".into() },
+                Entry {
+                    from: "x".into(),
+                    to: "X".into(),
+                },
+                Entry {
+                    from: "y".into(),
+                    to: "Y".into(),
+                },
             ],
         };
         dict.merge(vec![
-            Entry { from: "y".into(), to: "Y2".into() },
-            Entry { from: "z".into(), to: "Z".into() },
+            Entry {
+                from: "y".into(),
+                to: "Y2".into(),
+            },
+            Entry {
+                from: "z".into(),
+                to: "Z".into(),
+            },
         ]);
         assert_eq!(dict.entries.len(), 3);
         assert_eq!(dict.entries[0].from, "x");
@@ -142,11 +170,31 @@ mod tests {
     }
 
     #[test]
+    fn load_backs_up_corrupted_file_and_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dictionary.json");
+        std::fs::write(&path, "{ broken").unwrap();
+
+        let dict = Dictionary::load(&path);
+
+        assert!(dict.entries.is_empty());
+        let backup = dir.path().join("dictionary.json.bak");
+        assert!(backup.exists(), "破損辞書が .bak に退避されること");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{ broken");
+    }
+
+    #[test]
     fn merge_skips_empty_from() {
         let mut dict = Dictionary { entries: vec![] };
         dict.merge(vec![
-            Entry { from: "".into(), to: "something".into() },
-            Entry { from: "a".into(), to: "A".into() },
+            Entry {
+                from: "".into(),
+                to: "something".into(),
+            },
+            Entry {
+                from: "a".into(),
+                to: "A".into(),
+            },
         ]);
         assert_eq!(dict.entries.len(), 1);
         assert_eq!(dict.entries[0].from, "a");

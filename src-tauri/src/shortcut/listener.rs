@@ -4,8 +4,8 @@ use rdev::{grab, Event, EventType, Key};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::UnboundedSender as Sender;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::mpsc::UnboundedSender as Sender;
 
 #[derive(Debug, Clone)]
 pub enum RecordMode {
@@ -15,8 +15,13 @@ pub enum RecordMode {
 
 #[derive(Debug, Clone)]
 pub enum ShortcutEvent {
-    StartRecording { binding_id: String, mode: RecordMode },
-    StopRecording { binding_id: String },
+    StartRecording {
+        binding_id: String,
+        mode: RecordMode,
+    },
+    StopRecording {
+        binding_id: String,
+    },
     Cancel,
 }
 
@@ -91,8 +96,7 @@ pub fn start(
                         }
                         match binding.action {
                             ActionKind::StartRecord => {
-                                let held =
-                                    binding_held.entry(binding.id.clone()).or_insert(false);
+                                let held = binding_held.entry(binding.id.clone()).or_insert(false);
                                 if !already_held && !*held {
                                     *held = true;
                                     let _ = tx.send(ShortcutEvent::StartRecording {
@@ -124,8 +128,7 @@ pub fn start(
 
                     for binding in bindings_guard.iter().filter(|b| b.enabled) {
                         if binding.action == ActionKind::StartRecord {
-                            let held =
-                                binding_held.entry(binding.id.clone()).or_insert(false);
+                            let held = binding_held.entry(binding.id.clone()).or_insert(false);
                             if *held && binding.shortcut.is_part_of(k) {
                                 *held = false;
                                 let _ = tx.send(ShortcutEvent::StopRecording {
@@ -251,7 +254,10 @@ mod tests {
     fn parse_single_keys() {
         assert!(matches!(parse_single_key("rightoption"), Some(Key::AltGr)));
         assert!(matches!(parse_single_key("leftoption"), Some(Key::Alt)));
-        assert!(matches!(parse_single_key("leftcontrol"), Some(Key::ControlLeft)));
+        assert!(matches!(
+            parse_single_key("leftcontrol"),
+            Some(Key::ControlLeft)
+        ));
         assert!(matches!(parse_single_key("leftmeta"), Some(Key::MetaLeft)));
         assert!(matches!(parse_single_key("escape"), Some(Key::Escape)));
         assert!(matches!(parse_single_key("f5"), Some(Key::F5)));
@@ -264,8 +270,14 @@ mod tests {
 
     #[test]
     fn parse_shortcut_single() {
-        assert!(matches!(parse_shortcut("rightoption"), Some(ShortcutKey::Single(Key::AltGr))));
-        assert!(matches!(parse_shortcut("f5"), Some(ShortcutKey::Single(Key::F5))));
+        assert!(matches!(
+            parse_shortcut("rightoption"),
+            Some(ShortcutKey::Single(Key::AltGr))
+        ));
+        assert!(matches!(
+            parse_shortcut("f5"),
+            Some(ShortcutKey::Single(Key::F5))
+        ));
         assert!(parse_shortcut("bad_key").is_none());
     }
 
@@ -310,10 +322,16 @@ mod tests {
         let sk = parse_shortcut("rightoption+rightshift").unwrap();
         let mut held: HashSet<Key> = HashSet::new();
         held.insert(Key::AltGr);
-        assert!(!sk.matches_press(Key::AltGr, &held), "1つ目のキーだけでは発火しない");
+        assert!(
+            !sk.matches_press(Key::AltGr, &held),
+            "1つ目のキーだけでは発火しない"
+        );
 
         held.insert(Key::ShiftRight);
-        assert!(sk.matches_press(Key::ShiftRight, &held), "両方揃ったら発火する");
+        assert!(
+            sk.matches_press(Key::ShiftRight, &held),
+            "両方揃ったら発火する"
+        );
     }
 
     #[test]
@@ -322,10 +340,16 @@ mod tests {
         let sk = parse_shortcut("rightoption+rightshift").unwrap();
         let mut held: HashSet<Key> = HashSet::new();
         held.insert(Key::ShiftRight);
-        assert!(!sk.matches_press(Key::ShiftRight, &held), "1つ目のキーだけでは発火しない");
+        assert!(
+            !sk.matches_press(Key::ShiftRight, &held),
+            "1つ目のキーだけでは発火しない"
+        );
 
         held.insert(Key::AltGr);
-        assert!(sk.matches_press(Key::AltGr, &held), "逆順で完成しても発火する");
+        assert!(
+            sk.matches_press(Key::AltGr, &held),
+            "逆順で完成しても発火する"
+        );
     }
 
     #[test]

@@ -20,12 +20,6 @@ pub fn save_api_key_for(account: &str, key: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn delete_api_key_for(account: &str) -> Result<()> {
-    let entry = keyring::Entry::new(SERVICE, account)?;
-    entry.delete_credential().ok();
-    Ok(())
-}
-
 // ── 共通アカウント向けラッパー ────────────────────────────────
 
 pub fn resolve_api_key() -> Result<String> {
@@ -35,10 +29,6 @@ pub fn resolve_api_key() -> Result<String> {
 
 pub fn save_api_key(key: &str) -> Result<()> {
     save_api_key_for(ACCOUNT_COMMON, key)
-}
-
-pub fn delete_api_key() -> Result<()> {
-    delete_api_key_for(ACCOUNT_COMMON)
 }
 
 #[cfg(test)]

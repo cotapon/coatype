@@ -5,11 +5,11 @@ use anyhow::Result;
 const KNOWN_HEADERS: &[(&str, &str)] = &[
     ("from", "to"),
     ("変換前", "変換後"),
-    ("replacement", "original"),  // Talon words_to_replace.csv
+    ("replacement", "original"), // Talon words_to_replace.csv
     ("original", "replacement"),
     ("incorrect", "correct"),
     ("wrong", "correct"),
-    ("spoken form", "output"),    // Talon additional_words.csv
+    ("spoken form", "output"), // Talon additional_words.csv
     ("spoken", "written"),
 ];
 
@@ -253,8 +253,14 @@ mod tests {
     fn to_csv_roundtrip() {
         let dict = Dictionary {
             entries: vec![
-                Entry { from: "hello, world".to_string(), to: "greeting".to_string() },
-                Entry { from: "foo".to_string(), to: "bar".to_string() },
+                Entry {
+                    from: "hello, world".to_string(),
+                    to: "greeting".to_string(),
+                },
+                Entry {
+                    from: "foo".to_string(),
+                    to: "bar".to_string(),
+                },
             ],
         };
         let csv_str = to_csv(&dict).unwrap();

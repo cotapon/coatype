@@ -129,7 +129,7 @@ export function StatusOverlay() {
       {state === "processing" && (
         <>
           <Spinner size="sm" color="current" />
-          <span>Processing…</span>
+          <span>処理中…</span>
         </>
       )}
     </div>

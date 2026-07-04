@@ -67,15 +67,9 @@ export function UpdateDialog() {
 
         {/* テキスト */}
         <div className="flex flex-col items-center gap-2 text-center">
-          <h2 className="text-base font-semibold text-foreground">
-            アップデートが利用可能です
-          </h2>
-          <p className="text-sm text-muted">
-            CoAType バージョン {update.version} が利用可能です。
-          </p>
-          {update.body && (
-            <p className="whitespace-pre-wrap text-xs text-muted">{update.body}</p>
-          )}
+          <h2 className="text-base font-semibold text-foreground">アップデートが利用可能です</h2>
+          <p className="text-sm text-muted">CoAType バージョン {update.version} が利用可能です。</p>
+          {update.body && <p className="whitespace-pre-wrap text-xs text-muted">{update.body}</p>}
           <p className="text-sm text-muted">今すぐ更新しますか？</p>
         </div>
 

@@ -1,6 +1,6 @@
 use crate::api::auth::AuthKind;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -37,7 +37,11 @@ pub struct ProviderConfig {
 
 impl Default for ProviderConfig {
     fn default() -> Self {
-        Self { base_url: String::new(), model: String::new(), auth_kind: AuthKind::Bearer }
+        Self {
+            base_url: String::new(),
+            model: String::new(),
+            auth_kind: AuthKind::Bearer,
+        }
     }
 }
 
@@ -185,7 +189,10 @@ impl Settings {
 
         // 旧 shortcut/trigger_mode を bindings に変換
         if self.bindings.is_empty() {
-            let combo = self.shortcut.take().unwrap_or_else(|| default_combo().to_string());
+            let combo = self
+                .shortcut
+                .take()
+                .unwrap_or_else(|| default_combo().to_string());
             let action = match self.trigger_mode.take().unwrap_or(TriggerMode::PushToTalk) {
                 TriggerMode::PushToTalk => ActionKind::StartRecord,
                 TriggerMode::Toggle => ActionKind::HandsFree,
@@ -217,29 +224,28 @@ impl Settings {
         }
     }
 
-    pub fn load(path: &PathBuf) -> Self {
-        let existing: Option<Settings> = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok());
+    pub fn load(path: &Path) -> Self {
+        // 破損ファイルは .bak に退避してから作り直す (退避失敗しても続行はする)
+        let existing: Option<Settings> = crate::util::load_json_with_corruption_backup(path);
         let mut s = match existing {
             Some(s) => s,
             None => {
                 // 初回起動 (設定ファイルなし): システム言語を初期デフォルトにする
-                let mut d = Settings::default();
-                d.language = detect_system_language();
-                d
+                Settings {
+                    language: detect_system_language(),
+                    ..Default::default()
+                }
             }
         };
         s.migrate_legacy();
         s
     }
 
-    pub fn save(&self, path: &PathBuf) -> anyhow::Result<()> {
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(path, serde_json::to_string_pretty(self)?)?;
-        Ok(())
+        crate::util::atomic_write(path, serde_json::to_string_pretty(self)?.as_bytes())
     }
 }
 
@@ -405,9 +411,18 @@ mod tests {
         let mut s: Settings = serde_json::from_str(json).unwrap();
         s.migrate_legacy();
         let saved = serde_json::to_string(&s).unwrap();
-        assert!(!saved.contains("api_base"), "api_base must not be written after migration");
-        assert!(!saved.contains("\"shortcut\""), "shortcut must not be written after migration");
-        assert!(!saved.contains("trigger_mode"), "trigger_mode must not be written after migration");
+        assert!(
+            !saved.contains("api_base"),
+            "api_base must not be written after migration"
+        );
+        assert!(
+            !saved.contains("\"shortcut\""),
+            "shortcut must not be written after migration"
+        );
+        assert!(
+            !saved.contains("trigger_mode"),
+            "trigger_mode must not be written after migration"
+        );
         assert!(saved.contains("bindings"), "bindings block must be present");
     }
 
@@ -439,13 +454,18 @@ mod tests {
             "stt": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}}
         }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert!(s.show_overlay, "show_overlay が JSON にない場合は true がデフォルト");
+        assert!(
+            s.show_overlay,
+            "show_overlay が JSON にない場合は true がデフォルト"
+        );
     }
 
     #[test]
     fn show_overlay_false_roundtrip() {
-        let mut s = Settings::default();
-        s.show_overlay = false;
+        let s = Settings {
+            show_overlay: false,
+            ..Default::default()
+        };
         let json = serde_json::to_string(&s).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert!(!parsed.show_overlay);
@@ -460,15 +480,61 @@ mod tests {
             "stt": {"base_url": "https://example.com", "model": "m", "auth_kind": {"kind": "bearer"}}
         }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.input_device, None, "input_device が JSON にない場合は None がデフォルト");
+        assert_eq!(
+            s.input_device, None,
+            "input_device が JSON にない場合は None がデフォルト"
+        );
     }
 
     #[test]
     fn input_device_roundtrip() {
-        let mut s = Settings::default();
-        s.input_device = Some("USB Microphone".to_string());
+        let s = Settings {
+            input_device: Some("USB Microphone".to_string()),
+            ..Default::default()
+        };
         let json = serde_json::to_string(&s).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.input_device.as_deref(), Some("USB Microphone"));
+    }
+
+    #[test]
+    fn save_then_load_roundtrips_via_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = Settings {
+            language: "en".to_string(),
+            show_overlay: false,
+            ..Default::default()
+        };
+        s.save(&path).unwrap();
+        let loaded = Settings::load(&path);
+        assert_eq!(loaded, s);
+    }
+
+    #[test]
+    fn load_backs_up_corrupted_file_and_returns_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "{ this is not json").unwrap();
+
+        let loaded = Settings::load(&path);
+
+        // 破損ファイルは .bak に退避され、内容は保全される
+        let backup = dir.path().join("settings.json.bak");
+        assert!(backup.exists(), "破損ファイルが .bak に退避されること");
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            "{ this is not json"
+        );
+        // 読み込み結果はデフォルト相当 (バインドが初期構成)
+        assert_eq!(loaded.bindings, Settings::default().bindings);
+    }
+
+    #[test]
+    fn load_missing_file_creates_no_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let _ = Settings::load(&path);
+        assert!(!dir.path().join("settings.json.bak").exists());
     }
 }

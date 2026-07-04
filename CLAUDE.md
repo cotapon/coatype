@@ -15,29 +15,33 @@ AI エージェント向けのプロジェクト固有規約。グローバル�
 
 ```
 src/                    # React (Vite) フロントエンド
-  SettingsPage.tsx      # 設定UI (General / Dictionary / History / API Key)
+  SettingsPage.tsx      # 設定UI (General / Models / Dictionary / History / API Key)
   StatusOverlay.tsx     # 録音中オーバーレイ (220×60px, always-on-top)
-  invoke.ts             # tauri invoke / listen ラッパー
-  types.ts              # 共有型定義
+  UpdateDialog.tsx      # アップデート確認ダイアログ
+  invoke.ts             # tauri invoke / listen ラッパー (起動レース対策のリトライ付き)
+  types.ts              # 共有型定義 (Rust 側と手動で同期)
 
 src-tauri/src/
   main.rs               # Tauri セットアップ、shortcut → pipeline ループ
   commands.rs           # tauri::command 定義 (get/save settings, api_key 等)
-  pipeline.rs           # 録音 → Whisper → 辞書補正 → 挿入 のオーケストレーター
-  api/whisper.rs        # reqwest Whisper クライアント
+  pipeline.rs           # 録音 → Whisper → 辞書置換 → 挿入 のオーケストレーター
+  api/                  # whisper.rs (reqwest クライアント) + auth.rs (Bearer/ApiKeyHeader/None)
   audio/recorder.rs     # cpal マイク録音 → WAV
   shortcut/listener.rs  # rdev grab によるグローバルショートカット監視
-  injector.rs           # arboard + enigo でテキスト挿入 (Cmd+V)
-  config/settings.rs    # Settings 構造体 (JSON永続化)
-  dictionary/           # replace.rs (完全一致置換) + llm_correct.rs (LLM補正)
+  injector/             # arboard + enigo でテキスト挿入 (macos.rs / windows.rs)
+  focus/                # 前面アプリの PID 取得・復帰 (macos.rs / windows.rs)
+  config/settings.rs    # Settings 構造体 (JSON永続化、アトミック保存 + 破損時 .bak 退避)
+  dictionary/           # replace.rs (完全一致置換) + io.rs (CSV/Dragon インポート)
   history/store.rs      # SQLite 文字起こし履歴
   secrets/keychain.rs   # keyring による APIキー管理
   permissions.rs        # AXIsProcessTrustedWithOptions ラッパー
+  util.rs               # atomic_write / lock_or_recover (poison 回復) 共通ヘルパー
 ```
 
 **Tauri ウィンドウ:**
-- `settings` (720×560): 設定UI。× ボタンで閉じず非表示にする (再表示のため)
+- `settings` (1000×780, min 760×600): 設定UI。× ボタンで閉じず非表示にする (再表示のため)
 - `overlay` (220×60): 録音中オーバーレイ。always-on-top、transparent
+- `update-dialog`: 起動時アップデート確認。visible:false で起動し、新バージョンがあれば show
 
 **State 管理:**
 - `Arc<Pipeline>` を `app.manage` — 全コマンドから共有
@@ -97,8 +101,8 @@ pipeline.update_api_key(key);  // ← これがないと再起動まで 401 に�
 
 ### テキスト挿入
 
-`arboard` でクリップボードにテキストをセット → `enigo` で Cmd+V を送信。
-元のクリップボード内容は挿入後に復元する (`injector.rs`)。
+`arboard` でクリップボードにテキストをセット → `enigo` で Cmd+V (Windows は Ctrl+V) を送信。
+元のクリップボード内容は挿入後に復元する (`injector/macos.rs` / `injector/windows.rs`)。
 
 ### Dock / Cmd+Tab アイコンの更新
 
@@ -143,5 +147,5 @@ tracing ログ (`RUST_LOG=debug npm run tauri dev`) でキーイベントを確�
 ## 実装上の制約・方針
 
 - `save_settings` はリスナーを再起動しない。ショートカットキーの変更はアプリ再起動で反映される (将来的に `CFRunLoopStop` + 再 spawn で対応可能だが現状は未実装)
-- LLM補正クライアントは `main.rs` で `None` を渡している (Task 11 以降で初期化予定)
-- `cargo test` はすべて mockito を使った HTTP モックテスト。実際の API を叩くテストはない
+- 辞書補正は `dictionary/replace.rs` の完全一致置換のみ。LLM 補正は未実装 (`translate_model` フィールドだけ Settings に存在し、UI も未実装)
+- `cargo test` は mockito による HTTP モックと tempfile によるファイル I/O のユニットテスト。実際の API を叩くテストはない

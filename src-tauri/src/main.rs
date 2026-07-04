@@ -3,8 +3,8 @@
 use coatype_lib::api::whisper::WhisperClient;
 use coatype_lib::audio::recorder::Recorder;
 use coatype_lib::commands::{
-    ActiveShortcut, DictPath, ListenerBindings, ListenerPaused, ListenerState, MicTest,
-    SettingsPath, ShowOverlay, bindings_to_registered,
+    bindings_to_registered, ActiveShortcut, DictPath, ListenerBindings, ListenerPaused,
+    ListenerState, MicTest, SettingsPath, ShowOverlay,
 };
 use coatype_lib::config::settings::Settings;
 use coatype_lib::dictionary::replace::Dictionary;
@@ -12,6 +12,7 @@ use coatype_lib::history::store::HistoryStore;
 use coatype_lib::pipeline::{CurrentTask, Pipeline};
 use coatype_lib::secrets::keychain::{self, ACCOUNT_COMMON};
 use coatype_lib::shortcut::listener::{self, RecordMode, ShortcutEvent};
+use coatype_lib::util::lock_or_recover;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::menu::{Menu, MenuItem};
@@ -141,7 +142,13 @@ fn main() {
             // tokio 非同期チャンネルを使うことで recv().await が tokio スケジューラに
             // 制御を返し、spawn したタスクが同じスレッドで実行できるようになる。
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ShortcutEvent>();
-            listener::start(bindings_arc, paused_arc, tx, active_shortcut_state, app.handle().clone());
+            listener::start(
+                bindings_arc,
+                paused_arc,
+                tx,
+                active_shortcut_state,
+                app.handle().clone(),
+            );
 
             let handle = app.handle().clone();
             let pipeline_clone = pipeline.clone();
@@ -157,7 +164,11 @@ fn main() {
                     let Some(ev) = rx.recv().await else { break };
                     match ev {
                         ShortcutEvent::StartRecording { ref mode, .. } => {
-                            tracing::info!("shortcut: StartRecording mode={:?} is_recording={}", mode, is_recording);
+                            tracing::info!(
+                                "shortcut: StartRecording mode={:?} is_recording={}",
+                                mode,
+                                is_recording
+                            );
                             let should_start = match mode {
                                 RecordMode::PushToTalk => true,
                                 RecordMode::HandsFree => {
@@ -167,7 +178,7 @@ fn main() {
                                         spawn_stop_and_process(
                                             &pipeline_clone,
                                             &handle,
-                                            prev_pid.lock().unwrap().take(),
+                                            lock_or_recover(&prev_pid).take(),
                                             show_overlay_for_task.load(Ordering::Relaxed),
                                         );
                                         false
@@ -180,7 +191,7 @@ fn main() {
                             if should_start {
                                 #[cfg(any(target_os = "macos", target_os = "windows"))]
                                 {
-                                    *prev_pid.lock().unwrap() =
+                                    *lock_or_recover(&prev_pid) =
                                         coatype_lib::focus::capture_frontmost_pid();
                                 }
                                 // 音量通知は音声入力コールバックスレッド上で呼ばれるため、
@@ -208,8 +219,7 @@ fn main() {
                                     }
                                     Err(e) => {
                                         tracing::error!("record start error: {e}");
-                                        let _ = handle
-                                            .emit("error", format!("録音開始失敗: {e}"));
+                                        let _ = handle.emit("error", format!("録音開始失敗: {e}"));
                                     }
                                 }
                             }
@@ -219,7 +229,7 @@ fn main() {
                             spawn_stop_and_process(
                                 &pipeline_clone,
                                 &handle,
-                                prev_pid.lock().unwrap().take(),
+                                lock_or_recover(&prev_pid).take(),
                                 show_overlay_for_task.load(Ordering::Relaxed),
                             );
                         }
@@ -302,8 +312,20 @@ fn cursor_dist_sq(cx: f64, cy: f64, m: &tauri::Monitor) -> f64 {
     let top = p.y as f64;
     let right = left + s.width as f64;
     let bottom = top + s.height as f64;
-    let dx = if cx < left { left - cx } else if cx >= right { cx - right } else { 0.0 };
-    let dy = if cy < top { top - cy } else if cy >= bottom { cy - bottom } else { 0.0 };
+    let dx = if cx < left {
+        left - cx
+    } else if cx >= right {
+        cx - right
+    } else {
+        0.0
+    };
+    let dy = if cy < top {
+        top - cy
+    } else if cy >= bottom {
+        cy - bottom
+    } else {
+        0.0
+    };
     dx * dx + dy * dy
 }
 
@@ -356,7 +378,12 @@ fn spawn_stop_and_process(
 
     let pipeline_task = pipeline.clone();
     let handle_task = handle.clone();
+    let gen = pipeline.next_task_gen();
 
+    // ロックを保持したまま spawn → 登録することで、タスクが登録より先に完了して
+    // 完了済みハンドルが残るレースを防ぐ (タスク側の最終クリーンアップは同じ
+    // ロックを取るため、ここの解放を待ってから走る)。
+    let mut slot = lock_or_recover(&pipeline.current_task);
     let join = tokio::spawn(async move {
         match pipeline_task.stop_and_process().await {
             Ok(text) if !text.is_empty() => {
@@ -381,14 +408,29 @@ fn spawn_stop_and_process(
                 let _ = handle_task.emit("error", e.to_string());
             }
         }
-        let _ = handle_task.emit("recording-state", "idle");
-        if let Some(w) = handle_task.get_webview_window("overlay") {
-            let _ = w.hide();
+        // タスク完了時に current_task を解放する。ただし自分が登録した世代の
+        // ときだけ。無条件に None にすると、後から登録された新タスクのハンドルを
+        // 握り潰して Cancel が効かなくなる。
+        let is_latest = {
+            let mut cur = lock_or_recover(&pipeline_task.current_task);
+            if cur.as_ref().map(|t| t.gen) == Some(gen) {
+                *cur = None;
+                true
+            } else {
+                false
+            }
+        };
+        // UI の idle 化とオーバーレイ非表示も、自分が最新のタスクで、かつ新しい
+        // 録音が始まっていないときだけ行う。無条件に行うと、旧タスクの完了処理が
+        // 進行中の新録音のオーバーレイを消してしまう (世代照合だけでは「新録音は
+        // 開始済みだが停止前でタスク未登録」の窓を守れないため録音中判定も見る)。
+        if is_latest && !pipeline_task.is_recording() {
+            let _ = handle_task.emit("recording-state", "idle");
+            if let Some(w) = handle_task.get_webview_window("overlay") {
+                let _ = w.hide();
+            }
         }
-        // タスク完了時に current_task を解放
-        *pipeline_task.current_task.lock().unwrap() = None;
     });
 
-    *pipeline.current_task.lock().unwrap() = Some(CurrentTask { join });
+    *slot = Some(CurrentTask { join, gen });
 }
-

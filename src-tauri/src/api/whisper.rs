@@ -1,5 +1,6 @@
 use crate::api::auth::{apply_auth, AuthKind};
 use crate::api::error::ApiError;
+use crate::util::lock_or_recover;
 use reqwest::multipart::{Form, Part};
 use std::sync::{Arc, Mutex};
 
@@ -27,18 +28,25 @@ impl WhisperClient {
             model,
             auth_kind,
             api_key: Arc::new(Mutex::new(api_key)),
-        http,
+            http,
         }
     }
 
     pub fn set_api_key(&self, key: String) {
-        *self.api_key.lock().unwrap() = key;
+        *lock_or_recover(&self.api_key) = key;
     }
 
-    /// STT エンドポイントと API キーが両方設定済みかを返す。
-    /// どちらかが空なら録音前の事前チェックで弾く。
+    /// STT が使える状態かを返す。録音前の事前チェックで弾くために使う。
+    /// base URL は常に必須。API キーは認証が必要な auth_kind の場合のみ必須
+    /// (`AuthKind::None` の認証なしローカルエンドポイントはキーなしで使える)。
     pub fn is_configured(&self) -> bool {
-        !self.base.trim().is_empty() && !self.api_key.lock().unwrap().trim().is_empty()
+        if self.base.trim().is_empty() {
+            return false;
+        }
+        match self.auth_kind {
+            AuthKind::None => true,
+            _ => !lock_or_recover(&self.api_key).trim().is_empty(),
+        }
     }
 
     pub async fn transcribe(
@@ -79,7 +87,7 @@ impl WhisperClient {
     async fn post(&self, path: &str, form: Form) -> Result<String, ApiError> {
         let url = format!("{}{}", self.base, path);
         tracing::debug!("whisper: POST {url}");
-        let key = self.api_key.lock().unwrap().clone();
+        let key = lock_or_recover(&self.api_key).clone();
         let resp = apply_auth(self.http.post(&url), &self.auth_kind, &key)
             .multipart(form)
             .send()
@@ -89,7 +97,10 @@ impl WhisperClient {
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             tracing::error!("whisper: error {}: {body}", status.as_u16());
-            return Err(ApiError::Status { status: status.as_u16(), body });
+            return Err(ApiError::Status {
+                status: status.as_u16(),
+                body,
+            });
         }
         let parsed: WhisperResponse = resp.json().await?;
         Ok(parsed.text)
@@ -101,7 +112,43 @@ mod tests {
     use super::*;
 
     fn client(url: &str) -> WhisperClient {
-        WhisperClient::new(url.into(), "whisper-large-v3".into(), AuthKind::Bearer, "test-key".into())
+        WhisperClient::new(
+            url.into(),
+            "whisper-large-v3".into(),
+            AuthKind::Bearer,
+            "test-key".into(),
+        )
+    }
+
+    #[test]
+    fn is_configured_requires_base_url() {
+        let c = WhisperClient::new(String::new(), "m".into(), AuthKind::Bearer, "key".into());
+        assert!(!c.is_configured());
+    }
+
+    #[test]
+    fn is_configured_requires_key_when_auth_needed() {
+        let c = WhisperClient::new(
+            "http://localhost:9000".into(),
+            "m".into(),
+            AuthKind::Bearer,
+            String::new(),
+        );
+        assert!(!c.is_configured());
+        c.set_api_key("k".into());
+        assert!(c.is_configured());
+    }
+
+    #[test]
+    fn is_configured_allows_empty_key_for_auth_none() {
+        // 認証なしのローカル STT エンドポイントは API キーなしで使える
+        let c = WhisperClient::new(
+            "http://localhost:9000".into(),
+            "m".into(),
+            AuthKind::None,
+            String::new(),
+        );
+        assert!(c.is_configured());
     }
 
     #[tokio::test]
@@ -114,7 +161,10 @@ mod tests {
             .create_async()
             .await;
 
-        let text = client(&server.url()).transcribe(b"RIFF....fake", "ja", None).await.unwrap();
+        let text = client(&server.url())
+            .transcribe(b"RIFF....fake", "ja", None)
+            .await
+            .unwrap();
         assert_eq!(text, "こんにちは");
         mock.assert_async().await;
     }
@@ -129,7 +179,10 @@ mod tests {
             .create_async()
             .await;
 
-        let text = client(&server.url()).translate(b"RIFF....fake").await.unwrap();
+        let text = client(&server.url())
+            .translate(b"RIFF....fake")
+            .await
+            .unwrap();
         assert_eq!(text, "Hello");
         mock.assert_async().await;
     }
@@ -146,7 +199,10 @@ mod tests {
             .await;
 
         let c = WhisperClient::new(
-            server.url(), "custom-model".into(), AuthKind::Bearer, "key".into()
+            server.url(),
+            "custom-model".into(),
+            AuthKind::Bearer,
+            "key".into(),
         );
         c.transcribe(b"RIFF....fake", "ja", None).await.unwrap();
         mock.assert_async().await;
@@ -166,7 +222,9 @@ mod tests {
         let c = WhisperClient::new(
             server.url(),
             "whisper-1".into(),
-            AuthKind::ApiKeyHeader { header_name: "x-api-key".into() },
+            AuthKind::ApiKeyHeader {
+                header_name: "x-api-key".into(),
+            },
             "my-secret".into(),
         );
         c.transcribe(b"RIFF....fake", "ja", None).await.unwrap();
